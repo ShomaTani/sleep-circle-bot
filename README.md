@@ -9,7 +9,7 @@
 
 - [x] Phase 1: `/join`、パスフレーズと鍵、プライバシー設定、記録パネル、DB
 - [x] Phase 2: `/edit` `/delete` `/privacy` `/leave` `/mystats`（テキスト）
-- [ ] Phase 3: 週次スタッツの自動投稿とプライバシーテスト
+- [x] Phase 3: 週次スタッツの自動投稿とプライバシーテスト
 - [ ] Phase 4: カレンダーヒートマップ・睡眠帯グラフ
 - [ ] Phase 5: デプロイ手順
 
@@ -71,6 +71,16 @@ python -m sleepbot
 pip install -r requirements-dev.txt
 python -m pytest -q
 ```
+
+### 週次スタッツの確認（投稿はしない）
+
+```bash
+python -m sleepbot.weekly            # 今週月曜に投稿される内容
+python -m sleepbot.weekly 2026-10-12 # その日を含む週の月曜に投稿される内容
+```
+
+毎週月曜 8:00（JST）に前週（月〜日）分を `STATS_CHANNEL_ID` に投稿します。
+Bot が止まっていて 8:00 を逃した場合は、その週のうちに起動した時点で投稿します。投稿済みの週は DB に記録するので、再起動しても二重投稿しません。
 
 ## 使い方（メンバー向け）
 

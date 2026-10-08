@@ -45,6 +45,12 @@ CREATE TABLE IF NOT EXISTS sleep_records (
 );
 
 CREATE INDEX IF NOT EXISTS idx_records_user_date ON sleep_records(discord_id, sleep_date);
+
+-- 週次スタッツの二重投稿防止。投稿前に週を「確保」し、失敗したら解放する
+CREATE TABLE IF NOT EXISTS weekly_posts (
+    week_start TEXT PRIMARY KEY,
+    message_id INTEGER
+);
 """
 
 
@@ -159,6 +165,24 @@ class Database:
             self.conn.execute("DELETE FROM sleep_records WHERE discord_id = ?", (discord_id,))
             self.conn.execute("DELETE FROM users WHERE discord_id = ?", (discord_id,))
         self.conn.execute("VACUUM")
+
+    # ---- weekly_posts ----
+
+    def claim_week(self, week_start: date) -> bool:
+        """その週の投稿権を取る。すでに誰か（前回の起動など）が取っていれば False。"""
+        with self.conn:
+            cur = self.conn.execute("INSERT OR IGNORE INTO weekly_posts (week_start) VALUES (?)", (week_start.isoformat(),))
+        return cur.rowcount == 1
+
+    def release_week(self, week_start: date) -> None:
+        with self.conn:
+            self.conn.execute("DELETE FROM weekly_posts WHERE week_start = ?", (week_start.isoformat(),))
+
+    def mark_week_posted(self, week_start: date, message_id: int) -> None:
+        with self.conn:
+            self.conn.execute(
+                "UPDATE weekly_posts SET message_id = ? WHERE week_start = ?", (message_id, week_start.isoformat())
+            )
 
     # ---- sleep_records ----
 

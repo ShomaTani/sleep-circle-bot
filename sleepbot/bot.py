@@ -9,19 +9,21 @@ import asyncio
 import os
 import re
 import subprocess
-from datetime import timedelta
+from datetime import datetime, time, timedelta
 
 import discord
 from discord import app_commands
+from discord.ext import tasks
 
 from sleepbot import crypto
 from sleepbot.commands import UnlockLimiter, change_privacy, register_phase2
-from sleepbot.config import MAX_SESSION_HOURS, Config, load_config
+from sleepbot.config import JST, MAX_SESSION_HOURS, Config, load_config
 from sleepbot.db import Database, User
 from sleepbot.pending import PendingSleeps
 from sleepbot.safelog import log, log_exception, setup_logging
 from sleepbot.sleeplog import InvalidSession, format_duration, save_sleep
 from sleepbot.ui import SafeModal, SafeTree, SafeView
+from sleepbot.weekly import post_due, weekly_report
 
 REPO_URL = "https://github.com/ShomaTani/sleep-circle-bot"
 
@@ -45,9 +47,47 @@ class SleepBot(discord.Client):
         guild = discord.Object(id=self.cfg.guild_id)
         self.tree.copy_global_to(guild=guild)
         await self.tree.sync(guild=guild)
+        self.weekly_job.start()
 
     async def on_ready(self) -> None:
         log.info("ready as %s", self.user)
+        # 月曜 8:00 に止まっていた場合の取りこぼしを投稿する（投稿済みなら何もしない）
+        await self.post_weekly_if_due()
+
+    @tasks.loop(time=time(8, 0, tzinfo=JST))
+    async def weekly_job(self) -> None:
+        if datetime.now(JST).weekday() == 0:
+            await self.post_weekly_if_due()
+
+    @weekly_job.before_loop
+    async def _before_weekly(self) -> None:
+        await self.wait_until_ready()
+
+    @weekly_job.error
+    async def _weekly_error(self, error: BaseException) -> None:
+        log_exception("weekly_job", error)
+
+    async def post_weekly_if_due(self) -> None:
+        target = post_due(datetime.now(JST))
+        if target is None:
+            return
+        start, end = target
+        if not self.db.claim_week(start):
+            return  # 投稿済み（または別の起動が投稿中）
+        first = None
+        try:
+            messages = weekly_report(self.db, start, end, self.cfg.include_naps_in_total)
+            channel = self.get_channel(self.cfg.stats_channel_id) or await self.fetch_channel(self.cfg.stats_channel_id)
+            for text in messages:
+                msg = await channel.send(text, allowed_mentions=discord.AllowedMentions.none())
+                first = first or msg
+            self.db.mark_week_posted(start, first.id if first else 0)
+            log.info("weekly stats posted for week starting %s", start.isoformat())
+        except Exception as e:
+            # 1通も送れていなければ解放して次の機会に再挑戦。途中まで送れていたら二重投稿を避けて諦める
+            if first is None:
+                self.db.release_week(start)
+            log_exception("post_weekly", e)
 
     async def on_error(self, event_method: str, /, *args: object, **kwargs: object) -> None:
         import sys
