@@ -11,7 +11,7 @@
 - [x] Phase 2: `/edit` `/delete` `/privacy` `/leave` `/mystats`（テキスト）
 - [x] Phase 3: 週次スタッツの自動投稿とプライバシーテスト
 - [x] Phase 4: カレンダーヒートマップ・睡眠帯グラフ
-- [ ] Phase 5: デプロイ手順
+- [x] Phase 5: デプロイ手順（Google Cloud 無料枠）
 
 ## セットアップ
 
@@ -37,7 +37,9 @@
 
 ### 3. サーバー側の準備
 
-1. 個人チャンネルを入れるカテゴリを作る（例: `sleep-logs`）。@everyone の「チャンネルを見る」を OFF にしておくと安心
+1. 個人チャンネルを入れるカテゴリを作る（例: `sleep-logs`）
+   - カテゴリの「権限」で **Bot のロール（Bot と同じ名前）を追加し、次を ✅ にする**: チャンネルを見る／チャンネルの管理／権限の管理／メッセージを送信／メッセージ履歴を読む／メッセージのピン留め（なければ「メッセージの管理」）／ファイルを添付／埋め込みリンク
+   - そのうえで @everyone の「チャンネルを見る」を ❌ にしておくと安心（Bot を許可せずに閉じると `/join` が「権限がない」で失敗します）
 2. 週次スタッツを投稿するチャンネルを作る
 3. Discord の設定 → 詳細設定 → 開発者モード を ON にし、サーバー・カテゴリ・チャンネルを右クリック →「ID をコピー」
 
@@ -84,6 +86,53 @@ python -m sleepbot.weekly 2026-10-12 # その日を含む週の月曜に投稿�
 
 毎週月曜 8:00（JST）に前週（月〜日）分を `STATS_CHANNEL_ID` に投稿します。
 Bot が止まっていて 8:00 を逃した場合は、その週のうちに起動した時点で投稿します。投稿済みの週は DB に記録するので、再起動しても二重投稿しません。
+
+## Google Cloud で常時動かす（無料枠）
+
+Google Cloud の Always Free 枠の VM（e2-micro）1台で動かします。下の条件を守れば料金はかかりません。
+
+| 項目 | 無料にするための設定 |
+|---|---|
+| リージョン | `us-west1`（オレゴン）／`us-central1`（アイオワ）／`us-east1`（サウスカロライナ）のどれか |
+| マシンタイプ | `e2-micro`（1台だけ） |
+| ブートディスク | **標準永続ディスク**（「バランス」は無料枠外）、30GB 以下 |
+| その他 | 固定 IP（静的外部 IP）を予約しない。HTTP/HTTPS のファイアウォールは開けない（Bot は外向きの通信だけ） |
+
+### 1. アカウントと VM
+
+1. <https://console.cloud.google.com/> でアカウントを作る（本人確認でカード登録が必要。無料枠内なら請求なし）
+2. 「お支払い → 予算とアラート」で予算 ¥100 などのアラートを作っておく（万一の課金にすぐ気づける）
+3. 「Compute Engine → VM インスタンス → インスタンスを作成」
+   - 名前: `sleepbot`、リージョン: `us-west1`、マシンタイプ: `e2-micro`
+   - ブートディスク: 「変更」→ OS **Debian 12**、ディスクの種類 **標準永続ディスク**、サイズ 10GB
+   - ファイアウォール: チェックはすべて外したまま
+4. 作成後、一覧の「SSH」ボタンでブラウザからログインする
+
+### 2. 初期設定（SSH の画面で実行）
+
+```bash
+sudo apt-get update && sudo apt-get install -y git
+git clone https://github.com/ShomaTani/sleep-circle-bot.git
+sudo bash sleep-circle-bot/deploy/gcp/setup.sh
+```
+
+### 3. `.env` を置いて起動
+
+```bash
+sudo -u sleepbot nano /opt/sleepbot/.env   # 手元の .env の中身を貼り付けて保存（Ctrl+O → Enter → Ctrl+X）
+sudo chmod 600 /opt/sleepbot/.env
+sudo systemctl enable --now sleepbot
+sudo journalctl -u sleepbot -f             # 「ready as ...」と出れば成功（Ctrl+C で抜ける）
+```
+
+**手元の Mac などで同じトークンの Bot を動かしている場合は、先に止めてください。** 同じ Bot が2つ動くと、ボタンへの応答や週次投稿が重複します。
+
+### 運用
+
+- `main` に push すると、10分以内にサーバーが取り込んで再起動します（`deploy/gcp/update.sh`）。サーバー上でコードを書き換えても、次の確認で `main` に戻ります
+- いま動いているコミットは Discord の `/about` で誰でも確認できます
+- ログ: `sudo journalctl -u sleepbot -n 100`／再起動: `sudo systemctl restart sleepbot`
+- 記録は `/opt/sleepbot/data/sleep.db` にあります
 
 ## 使い方（メンバー向け）
 

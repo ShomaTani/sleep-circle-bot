@@ -1,0 +1,23 @@
+[Unit]
+Description=Sleep circle Discord bot
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=sleepbot
+WorkingDirectory=/opt/sleepbot
+ExecStart=/opt/sleepbot/.venv/bin/python -m sleepbot
+Restart=always
+RestartSec=10
+Environment=PYTHONUNBUFFERED=1
+Environment=MPLCONFIGDIR=/opt/sleepbot/data/.matplotlib
+
+# 書き込めるのは data/ だけ
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ReadWritePaths=/opt/sleepbot/data
+
+[Install]
+WantedBy=multi-user.target

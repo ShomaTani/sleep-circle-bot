@@ -52,6 +52,10 @@ class SleepBot(discord.Client):
 
     async def on_ready(self) -> None:
         log.info("ready as %s", self.user)
+        if not isinstance(self.get_channel(self.cfg.category_id), discord.CategoryChannel):
+            log.warning("CATEGORY_ID のカテゴリが見えません。Bot のロールに「チャンネルを見る」などを許可してください（README 参照）")
+        if self.get_channel(self.cfg.stats_channel_id) is None:
+            log.warning("STATS_CHANNEL_ID のチャンネルが見えません")
         # 月曜 8:00 に止まっていた場合の取りこぼしを投稿する（投稿済みなら何もしない）
         await self.post_weekly_if_due()
 
@@ -172,9 +176,17 @@ async def finish_join(bot: SleepBot, interaction: discord.Interaction, keys: cry
             embed_links=True,
         ),
     }
-    channel = await guild.create_text_channel(
-        channel_name(member.name), category=category, overwrites=overwrites, reason="sleep bot: /join"
-    )
+    try:
+        channel = await guild.create_text_channel(
+            channel_name(member.name), category=category, overwrites=overwrites, reason="sleep bot: /join"
+        )
+    except discord.Forbidden:
+        log.warning("cannot create channel in category: missing permissions (see README)")
+        await interaction.followup.send(
+            "Bot にカテゴリの権限がなくて、チャンネルを作れなかったよ。管理者に README の「サーバー側の準備」を確認してもらってね。",
+            ephemeral=True,
+        )
+        return
     try:
         bot.db.add_user(
             discord_id=member.id,
