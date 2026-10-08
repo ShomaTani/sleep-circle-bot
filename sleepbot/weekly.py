@@ -227,14 +227,23 @@ def weekly_report(db: Database, start: date, end: date, include_naps: bool) -> l
     return [text for text, _ in weekly_post(db, start, end, include_naps).messages]
 
 
+# 月曜 8:00 に止まっていた場合、この時間内に起動すれば遅れて投稿する。
+# それより後は投稿しない（初回起動や長期停止のあとに古い週を投稿しないため）
+CATCH_UP = timedelta(hours=48)
+
+
 def post_due(now: datetime) -> tuple[date, date] | None:
-    """いま投稿すべき週（前週）。今週の月曜 8:00 JST より前なら None。"""
+    """いま投稿すべき週（前週）。今週の月曜 8:00〜48時間後の間でなければ None。"""
     local = now.astimezone(JST)
     monday = local.date() - timedelta(days=local.weekday())
     due = datetime(monday.year, monday.month, monday.day, 8, 0, tzinfo=JST)
-    if local < due:
+    if not (due <= local < due + CATCH_UP):
         return None
     return previous_week(local.date())
+
+
+def has_any_record(members: list[MemberWeek]) -> bool:
+    return any(m.duration.record_days or m.duration.nap_count for m in members)
 
 
 if __name__ == "__main__":

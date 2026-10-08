@@ -24,7 +24,7 @@ from sleepbot.pending import PendingSleeps
 from sleepbot.safelog import log, log_exception, setup_logging
 from sleepbot.sleeplog import InvalidSession, format_duration, save_sleep
 from sleepbot.ui import SafeModal, SafeTree, SafeView
-from sleepbot.weekly import load_members, post_due, render_post
+from sleepbot.weekly import has_any_record, load_members, post_due, render_post
 
 REPO_URL = "https://github.com/ShomaTani/sleep-circle-bot"
 
@@ -78,6 +78,9 @@ class SleepBot(discord.Client):
         first = None
         try:
             members = load_members(self.db, start, end, self.cfg.include_naps_in_total)
+            if not has_any_record(members):
+                log.info("weekly stats skipped (no records) for week starting %s", start.isoformat())
+                return  # 確保したままにして、その週は二度と試さない
             post = await asyncio.to_thread(render_post, members, start, end)
             channel = self.get_channel(self.cfg.stats_channel_id) or await self.fetch_channel(self.cfg.stats_channel_id)
             for text, files in post.messages:

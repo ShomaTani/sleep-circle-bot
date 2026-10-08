@@ -119,7 +119,16 @@ def test_messages_fit_discord_limit():
 def test_post_due():
     assert post_due(jst(2026, 10, 12, 7, 59)) is None  # 月曜 8:00 前
     assert post_due(jst(2026, 10, 12, 8, 0)) == (START, END)
-    assert post_due(jst(2026, 10, 14, 22, 0)) == (START, END)  # 水曜に起動しても前週分
+    assert post_due(jst(2026, 10, 14, 7, 59)) == (START, END)  # 48時間以内なら遅れて投稿
+    assert post_due(jst(2026, 10, 14, 8, 0)) is None  # それ以降は投稿しない
+    assert post_due(jst(2026, 10, 9, 0, 53)) is None  # 金曜の初回起動で前週を投稿しない
+
+
+def test_empty_week_has_no_records(db):
+    from sleepbot.weekly import has_any_record, load_members
+
+    make_user(db, 9, share_times=False)
+    assert not has_any_record(load_members(db, START, END, False))
 
 
 def test_claim_prevents_double_post(db):
