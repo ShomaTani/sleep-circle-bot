@@ -1,4 +1,4 @@
-"""Discord Bot 本体（Phase 1: /join・プライバシー設定・記録パネル・/about）。
+"""Discord Bot 本体（/join・プライバシー設定・記録パネル・/about）。Phase 2 のコマンドは commands.py。
 
 個人向けの返信はすべて ephemeral か個人チャンネル内。共有チャンネルには何も送らない。
 """
@@ -15,46 +15,15 @@ import discord
 from discord import app_commands
 
 from sleepbot import crypto
+from sleepbot.commands import UnlockLimiter, change_privacy, register_phase2
 from sleepbot.config import MAX_SESSION_HOURS, Config, load_config
 from sleepbot.db import Database, User
 from sleepbot.pending import PendingSleeps
 from sleepbot.safelog import log, log_exception, setup_logging
 from sleepbot.sleeplog import InvalidSession, format_duration, save_sleep
+from sleepbot.ui import SafeModal, SafeTree, SafeView
 
 REPO_URL = "https://github.com/ShomaTani/sleep-circle-bot"
-
-GENERIC_ERROR = "ごめん、うまく処理できなかった。少し待ってからもう一度試してね。"
-
-
-async def _send_error(interaction: discord.Interaction) -> None:
-    try:
-        if interaction.response.is_done():
-            await interaction.followup.send(GENERIC_ERROR, ephemeral=True)
-        else:
-            await interaction.response.send_message(GENERIC_ERROR, ephemeral=True)
-    except discord.HTTPException:
-        pass
-
-
-class SafeView(discord.ui.View):
-    """例外の中身をログに出さない View。"""
-
-    async def on_error(self, interaction: discord.Interaction, error: Exception, item: discord.ui.Item) -> None:
-        log_exception(f"view:{type(self).__name__}", error)
-        await _send_error(interaction)
-
-
-class SafeModal(discord.ui.Modal):
-    async def on_error(self, interaction: discord.Interaction, error: Exception) -> None:
-        log_exception(f"modal:{type(self).__name__}", error)
-        await _send_error(interaction)
-
-
-class SafeTree(app_commands.CommandTree):
-    async def on_error(self, interaction: discord.Interaction, error: app_commands.AppCommandError) -> None:
-        log_exception(f"command:{interaction.command.name if interaction.command else '?'}", error)
-        await _send_error(interaction)
-
 
 class SleepBot(discord.Client):
     def __init__(self, cfg: Config) -> None:
@@ -64,6 +33,7 @@ class SleepBot(discord.Client):
         self.cfg = cfg
         self.db = Database(cfg.database_path)
         self.pending = PendingSleeps()
+        self.unlock_limiter = UnlockLimiter()
         self.tree = SafeTree(self)
 
     async def setup_hook(self) -> None:
@@ -71,6 +41,7 @@ class SleepBot(discord.Client):
         self.add_view(PrivacyChoiceView(self))
         self.add_view(RecordPanelView(self))
         register_commands(self)
+        register_phase2(self)
         guild = discord.Object(id=self.cfg.guild_id)
         self.tree.copy_global_to(guild=guild)
         await self.tree.sync(guild=guild)
@@ -210,12 +181,7 @@ class PrivacyChoiceView(SafeView):
         if user is None:
             await interaction.response.send_message("このボタンはチャンネルの持ち主だけが使えます。", ephemeral=True)
             return
-        self.bot.db.set_share_times(user.discord_id, share)
-        if share:
-            msg = "「時刻も共有する」にしたよ。これからの記録の入眠・起床時刻が週次スタッツで共有されます。"
-        else:
-            msg = "「睡眠時間だけ共有する」にしたよ。入眠・起床時刻は共有されません。"
-        await interaction.response.send_message(msg, ephemeral=True)
+        await change_privacy(self.bot, interaction, user, share)
         if user.panel_message_id is None:
             await post_panel(self.bot, interaction.channel, user.discord_id)
 

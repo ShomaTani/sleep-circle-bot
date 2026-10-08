@@ -75,6 +75,18 @@ class SleepRecord:
     source: str
 
 
+@dataclass(frozen=True)
+class NewRecord:
+    discord_id: int
+    sleep_date: date
+    duration_minutes: int
+    is_nap: bool
+    encrypted_times: bytes
+    public_bedtime_utc: datetime | None
+    public_waketime_utc: datetime | None
+    source: str
+
+
 def _today_jst() -> str:
     return datetime.now(JST).date().isoformat()
 
@@ -150,36 +162,57 @@ class Database:
 
     # ---- sleep_records ----
 
-    def add_record(
-        self,
-        discord_id: int,
-        sleep_date: date,
-        duration_minutes: int,
-        is_nap: bool,
-        encrypted_times: bytes,
-        public_bedtime_utc: datetime | None,
-        public_waketime_utc: datetime | None,
-        source: str,
-    ) -> int:
+    def add_record(self, rec: NewRecord) -> int:
+        with self.conn:
+            return self._insert(rec)
+
+    def replace_day(self, rec: NewRecord) -> int:
+        """その日の記録をすべて消して rec に置き換える。消した件数を返す。"""
+        with self.conn:
+            removed = self.conn.execute(
+                "DELETE FROM sleep_records WHERE discord_id = ? AND sleep_date = ?",
+                (rec.discord_id, rec.sleep_date.isoformat()),
+            ).rowcount
+            self._insert(rec)
+        return removed
+
+    def delete_day(self, discord_id: int, sleep_date: date) -> int:
+        with self.conn:
+            return self.conn.execute(
+                "DELETE FROM sleep_records WHERE discord_id = ? AND sleep_date = ?",
+                (discord_id, sleep_date.isoformat()),
+            ).rowcount
+
+    def set_public_times(self, times: list[tuple[int, datetime, datetime]]) -> None:
+        """(record_id, bedtime_utc, waketime_utc) の平文の時刻を書く。時刻共有ONの人の過去分公開用。"""
+        today = _today_jst()
+        with self.conn:
+            self.conn.executemany(
+                """UPDATE sleep_records SET public_bedtime_utc = ?, public_waketime_utc = ?, updated_at = ?
+                   WHERE id = ?
+                     AND discord_id IN (SELECT discord_id FROM users WHERE share_times = 1)""",
+                [(bed.isoformat(), wake.isoformat(), today, rid) for rid, bed, wake in times],
+            )
+
+    def _insert(self, rec: NewRecord) -> int:
         today = _today_jst()
         cur = self.conn.execute(
             """INSERT INTO sleep_records (discord_id, sleep_date, duration_minutes, is_nap,
                    encrypted_times, public_bedtime_utc, public_waketime_utc, source, created_at, updated_at)
                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
-                discord_id,
-                sleep_date.isoformat(),
-                duration_minutes,
-                int(is_nap),
-                encrypted_times,
-                public_bedtime_utc.isoformat() if public_bedtime_utc else None,
-                public_waketime_utc.isoformat() if public_waketime_utc else None,
-                source,
+                rec.discord_id,
+                rec.sleep_date.isoformat(),
+                rec.duration_minutes,
+                int(rec.is_nap),
+                rec.encrypted_times,
+                rec.public_bedtime_utc.isoformat() if rec.public_bedtime_utc else None,
+                rec.public_waketime_utc.isoformat() if rec.public_waketime_utc else None,
+                rec.source,
                 today,
                 today,
             ),
         )
-        self.conn.commit()
         return int(cur.lastrowid)
 
     def list_records(self, discord_id: int, start: date | None = None, end: date | None = None) -> list[SleepRecord]:
