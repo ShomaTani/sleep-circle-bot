@@ -10,7 +10,7 @@
 - [x] Phase 1: `/join`、パスフレーズと鍵、プライバシー設定、記録パネル、DB
 - [x] Phase 2: `/edit` `/delete` `/privacy` `/leave` `/mystats`（テキスト）
 - [x] Phase 3: 週次スタッツの自動投稿とプライバシーテスト
-- [ ] Phase 4: カレンダーヒートマップ・睡眠帯グラフ
+- [x] Phase 4: カレンダーヒートマップ・睡眠帯グラフ
 - [ ] Phase 5: デプロイ手順
 
 ## セットアップ
@@ -62,8 +62,11 @@ Python 3.11 または 3.12。
 python -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
+./scripts/fetch_font.sh   # グラフ用の日本語フォント（Mac でヒラギノがあれば省略可）
 python -m sleepbot
 ```
+
+フォントは `FONT_PATH` → `fonts/` → システムの Noto Sans JP / ヒラギノ の順に探します。
 
 ### テスト
 
@@ -76,7 +79,7 @@ python -m pytest -q
 
 ```bash
 python -m sleepbot.weekly            # 今週月曜に投稿される内容
-python -m sleepbot.weekly 2026-10-12 # その日を含む週の月曜に投稿される内容
+python -m sleepbot.weekly 2026-10-12 # その日を含む週の月曜に投稿される内容（画像は data/preview/ に保存）
 ```
 
 毎週月曜 8:00（JST）に前週（月〜日）分を `STATS_CHANNEL_ID` に投稿します。
@@ -91,7 +94,7 @@ Bot が止まっていて 8:00 を逃した場合は、その週のうちに起�
 | `/edit date bedtime waketime [add]` | 記録を手入力。`date` は**起きた日**。入眠が起床より遅い時刻なら前日の夜とみなす（例: `2026-10-08 23:30 07:00` → 10/7 23:30〜10/8 7:00）。その日の記録は置き換え、`add:True` なら追加（昼寝など） |
 | `/delete date` | その日（起きた日）の記録を削除。確認あり |
 | `/privacy` | 時刻を共有するかを変更。共有をやめると、共有用に保存していた時刻はすぐ削除。共有を始めるときは、パスフレーズを入れれば過去分も共有できる |
-| `/mystats [week\|month]` | 直近7日／30日の自分のスタッツ。時刻も見るときはパスフレーズを入力 |
+| `/mystats [week\|month]` | 直近7日／30日の自分のスタッツとカレンダー画像。パスフレーズを入れると時刻と睡眠帯グラフも |
 | `/leave` | 退会。個人チャンネルと全記録を削除。確認あり |
 | `/about` | ソースコードと、いま動いているコミット |
 

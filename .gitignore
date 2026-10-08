@@ -5,3 +5,5 @@ data/
 __pycache__/
 .venv/
 .pytest_cache/
+fonts/*.ttf
+fonts/*.otf

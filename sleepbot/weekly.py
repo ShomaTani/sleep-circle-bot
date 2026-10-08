@@ -3,17 +3,19 @@
 出力はすべて visible_fields(user, Audience.PUBLIC) を通す。
 時刻は「時刻も共有する」人の平文の時刻（public_*_utc）だけから計算し、暗号化された時刻には触れない。
 
-    python -m sleepbot.weekly [YYYY-MM-DD]   # 投稿される内容を表示するだけ（投稿しない）
+    python -m sleepbot.weekly [YYYY-MM-DD]   # 投稿される内容を表示するだけ（投稿しない）。画像は data/preview/ に保存
 """
 
 from __future__ import annotations
 
 import sys
 from dataclasses import dataclass
+from pathlib import Path
 from datetime import date, datetime, timedelta
 
 from sleepbot.config import JST
 from sleepbot.db import Database, SleepRecord, User
+from sleepbot.images import Sleep, sleep_bands, to_png, weekly_heatmap
 from sleepbot.privacy import Audience, Field, visible_fields
 from sleepbot.sleeplog import format_duration
 from sleepbot.stats import DurationSummary, TimeSummary, duration_summary, format_clock, previous_week, time_summary
@@ -41,6 +43,7 @@ class MemberWeek:
     user: User
     duration: DurationSummary
     times: TimeSummary | None  # 時刻を共有していない人は必ず None
+    public_sleeps: list[Sleep] | None  # 同上。睡眠帯グラフ用
 
 
 def collect(
@@ -51,7 +54,7 @@ def collect(
         fields = visible_fields(u, Audience.PUBLIC)
         recs = records_by_user.get(u.discord_id, [])
         dur = duration_summary(recs, include_naps) if Field.DURATION in fields else duration_summary([], include_naps)
-        times = None
+        times = sleeps = None
         if Field.TIMES in fields:
             timed = [
                 (r, r.public_bedtime_utc, r.public_waketime_utc)
@@ -59,7 +62,8 @@ def collect(
                 if r.public_bedtime_utc is not None and r.public_waketime_utc is not None
             ]
             times = time_summary(timed)
-        members.append(MemberWeek(u, dur, times))
+            sleeps = [Sleep(r.sleep_date, b, w, r.is_nap) for r, b, w in timed]
+        members.append(MemberWeek(u, dur, times, sleeps))
     return members
 
 
@@ -170,10 +174,57 @@ def _blocks(body: str) -> list[str]:
     return out
 
 
-def weekly_report(db: Database, start: date, end: date, include_naps: bool) -> list[str]:
+def build_figures(members: list[MemberWeek], start: date, end: date) -> dict:
+    """{"duration": Figure, "times": Figure | None}。睡眠帯は public_sleeps を持つ人（時刻共有）だけ。"""
+    with_records = sorted(
+        (m for m in members if m.duration.record_days),
+        key=lambda m: (-(m.duration.average_minutes or 0), m.user.display_name),
+    )
+    heat = weekly_heatmap([(m.user.display_name, m.duration.daily_minutes) for m in with_records], start)
+    sharing = [m for m in members if m.public_sleeps]
+    bands = (
+        sleep_bands(
+            [(m.user.display_name, m.public_sleeps) for m in sorted(sharing, key=lambda m: m.user.display_name)],
+            start, end, "睡眠帯（「時刻も共有する」を選んだ人のみ）",
+        )
+        if sharing
+        else None
+    )
+    return {"duration": heat if with_records else None, "times": bands}
+
+
+@dataclass(frozen=True)
+class WeeklyPost:
+    messages: list[tuple[str, list[tuple[str, bytes]]]]  # (本文, [(ファイル名, PNG)])
+
+
+def load_members(db: Database, start: date, end: date, include_naps: bool) -> list[MemberWeek]:
     users = [u for u in db.list_users() if u.joined_at <= end.isoformat()]
     records = {u.discord_id: db.list_records(u.discord_id, start, end) for u in users}
-    return split_messages(build_sections(collect(users, records, include_naps), start, end))
+    return collect(users, records, include_naps)
+
+
+def render_post(members: list[MemberWeek], start: date, end: date) -> WeeklyPost:
+    """本文と画像。画像は各セクションの最後のメッセージに付ける。DB に触らないのでスレッドで呼べる。"""
+    figures = build_figures(members, start, end)
+    out: list[tuple[str, list[tuple[str, bytes]]]] = []
+    for key, body in build_sections(members, start, end):
+        chunks = split_messages([(key, body)])
+        for i, text in enumerate(chunks):
+            files = []
+            if i == len(chunks) - 1 and figures.get(key) is not None:
+                files.append((f"{key}-{start.isoformat()}.png", to_png(figures[key])))
+            out.append((text, files))
+    return WeeklyPost(out)
+
+
+def weekly_post(db: Database, start: date, end: date, include_naps: bool) -> WeeklyPost:
+    return render_post(load_members(db, start, end, include_naps), start, end)
+
+
+def weekly_report(db: Database, start: date, end: date, include_naps: bool) -> list[str]:
+    """本文だけ（テスト・確認用）。"""
+    return [text for text, _ in weekly_post(db, start, end, include_naps).messages]
 
 
 def post_due(now: datetime) -> tuple[date, date] | None:
@@ -192,5 +243,12 @@ if __name__ == "__main__":
     cfg = load_config()
     today = date.fromisoformat(sys.argv[1]) if len(sys.argv) > 1 else datetime.now(JST).date()
     s, e = previous_week(today)
-    for msg in weekly_report(Database(cfg.database_path), s, e, cfg.include_naps_in_total):
-        print(msg, end="\n\n---\n\n")
+    post = weekly_post(Database(cfg.database_path), s, e, cfg.include_naps_in_total)
+    for text, files in post.messages:
+        print(text)
+        for name, png in files:
+            out = Path("data/preview") / name
+            out.parent.mkdir(parents=True, exist_ok=True)
+            out.write_bytes(png)
+            print(f"[画像] {out}")
+        print("\n---\n")

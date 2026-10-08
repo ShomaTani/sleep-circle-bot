@@ -1,8 +1,9 @@
-"""Phase 2: /edit /delete /privacy /leave /mystats。返信はすべて ephemeral。"""
+"""/edit /delete /privacy /leave /mystats。返信はすべて ephemeral。"""
 
 from __future__ import annotations
 
 import asyncio
+import io
 import time
 from collections.abc import Awaitable, Callable
 from datetime import datetime
@@ -14,6 +15,7 @@ from discord import app_commands
 from sleepbot import crypto
 from sleepbot.config import JST
 from sleepbot.db import SleepRecord, User
+from sleepbot.images import Sleep, month_calendar, sleep_bands, to_png
 from sleepbot.privacy import Audience, Field, visible_fields
 from sleepbot.sleeplog import (
     InvalidInput,
@@ -336,16 +338,30 @@ def register_phase2(bot: SleepBot) -> None:
         start, end = period_range(period, datetime.now(JST).date())
         records = bot.db.list_records(user.discord_id, start, end)
         text = duration_report(bot, records, start, end)
+        await interaction.response.defer(ephemeral=True, thinking=True)
+
+        files = []
+        if records:
+            daily = duration_summary(records, bot.cfg.include_naps_in_total).daily_minutes
+            title = f"睡眠時間 {fmt_date(start)}〜{fmt_date(end)}"
+            png = await asyncio.to_thread(lambda: to_png(month_calendar(daily, start, end, title)))
+            files.append(discord.File(io.BytesIO(png), filename="calendar.png"))
 
         if not records or Field.TIMES not in visible_fields(user, Audience.SELF):
-            await interaction.response.send_message(clip(text), ephemeral=True)
+            await interaction.followup.send(clip(text), files=files, ephemeral=True)
             return
 
         async def show_times(inter: discord.Interaction, _: User, timed: list[TimedRecord]) -> None:
-            await inter.followup.send(clip(times_report(timed)), ephemeral=True)
+            # 復号した時刻はこの関数の中だけで使い、画像はメモリ上で作って送ったら捨てる
+            sleeps = [Sleep(t.record.sleep_date, t.bedtime_utc, t.waketime_utc, t.record.is_nap) for t in timed]
+            png = await asyncio.to_thread(lambda: to_png(sleep_bands([("", sleeps)], start, end, "あなたの睡眠帯")))
+            await inter.followup.send(
+                clip(times_report(timed)), file=discord.File(io.BytesIO(png), filename="sleep-bands.png"), ephemeral=True
+            )
 
-        await interaction.response.send_message(
-            clip(text) + "\n\n入眠・起床時刻も見るときは、下のボタンからパスフレーズを入力してね。",
+        await interaction.followup.send(
+            clip(text) + "\n\n入眠・起床時刻と睡眠帯グラフも見るときは、下のボタンからパスフレーズを入力してね。",
+            files=files,
             view=UnlockButtonView(bot, user.discord_id, "🔒 時刻も見る", records, show_times),
             ephemeral=True,
         )

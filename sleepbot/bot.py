@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import asyncio
+import io
 import os
 import re
 import subprocess
@@ -23,7 +24,7 @@ from sleepbot.pending import PendingSleeps
 from sleepbot.safelog import log, log_exception, setup_logging
 from sleepbot.sleeplog import InvalidSession, format_duration, save_sleep
 from sleepbot.ui import SafeModal, SafeTree, SafeView
-from sleepbot.weekly import post_due, weekly_report
+from sleepbot.weekly import load_members, post_due, render_post
 
 REPO_URL = "https://github.com/ShomaTani/sleep-circle-bot"
 
@@ -76,10 +77,15 @@ class SleepBot(discord.Client):
             return  # 投稿済み（または別の起動が投稿中）
         first = None
         try:
-            messages = weekly_report(self.db, start, end, self.cfg.include_naps_in_total)
+            members = load_members(self.db, start, end, self.cfg.include_naps_in_total)
+            post = await asyncio.to_thread(render_post, members, start, end)
             channel = self.get_channel(self.cfg.stats_channel_id) or await self.fetch_channel(self.cfg.stats_channel_id)
-            for text in messages:
-                msg = await channel.send(text, allowed_mentions=discord.AllowedMentions.none())
+            for text, files in post.messages:
+                msg = await channel.send(
+                    text,
+                    files=[discord.File(io.BytesIO(png), filename=name) for name, png in files],
+                    allowed_mentions=discord.AllowedMentions.none(),
+                )
                 first = first or msg
             self.db.mark_week_posted(start, first.id if first else 0)
             log.info("weekly stats posted for week starting %s", start.isoformat())
