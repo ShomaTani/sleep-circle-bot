@@ -88,3 +88,15 @@ def test_month_calendar_renders():
     fig = month_calendar(daily, date(2026, 9, 10), date(2026, 10, 9), "t")
     assert "7:00" in texts(fig) and "10/1" in texts(fig)
     to_png(fig)
+
+
+def test_empty_frames_render():
+    """記録ゼロでも /mystats の空の枠（カレンダー・睡眠帯）が描けること。"""
+    from sleepbot.images import sleep_bands
+
+    start, end = date(2026, 10, 4), date(2026, 10, 10)
+    cal = month_calendar({}, start, end, "t")
+    assert not any(":" in t for t in texts(cal) if t != "t")  # 時間の数字は一切入らない
+    bands = sleep_bands([("", [])], start, end, "あなたの睡眠帯")
+    assert bars(bands) == []
+    to_png(cal), to_png(bands)

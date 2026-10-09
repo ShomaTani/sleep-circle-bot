@@ -370,7 +370,29 @@ def register_phase2(bot: SleepBot) -> None:
         start, end = period_range(period, datetime.now(JST).date())
         records = bot.db.list_records(user.discord_id, start, end)
         text = duration_report(bot, records, start, end)
+
+        if not records and not bot.cfg.preview_empty_stats:
+            # 本番の動き: 記録がなければ画像は作らずにすぐ返す
+            await interaction.response.send_message(clip(text), ephemeral=True)
+            return
+
         await interaction.response.defer(ephemeral=True, thinking=True)
+
+        if not records:
+            # 実験フェーズ用（PREVIEW_EMPTY_STATS=true）: 空の枠で見た目だけ確認できるようにする。
+            # 記録がないので復号するものもなく、パスフレーズなしで空の睡眠帯も出す
+            title = f"睡眠時間 {fmt_date(start)}〜{fmt_date(end)}"
+            cal = await asyncio.to_thread(lambda: to_png(month_calendar({}, start, end, title)))
+            bands = await asyncio.to_thread(lambda: to_png(sleep_bands([("", [])], start, end, "あなたの睡眠帯")))
+            await interaction.followup.send(
+                "⚠️ この期間の記録がまだないよ。下の画像は表示の枠だけ（記録がたまるとここに入ります）。",
+                files=[
+                    discord.File(io.BytesIO(cal), filename="calendar.png"),
+                    discord.File(io.BytesIO(bands), filename="sleep-bands.png"),
+                ],
+                ephemeral=True,
+            )
+            return
 
         files = []
         if records:

@@ -25,6 +25,9 @@ class Config:
     database_path: str
     include_naps_in_total: bool
     report_channel_id: int | None = None  # リアルタイム共有の投稿先（未設定なら無効）
+    # 実験フェーズ用: 記録がなくても /mystats で空の枠（画像）を出して見た目を確認できるようにする。
+    # 本番では false にして、記録がなければ画像を作らずにメッセージだけ返す
+    preview_empty_stats: bool = True
 
 
 def load_config() -> Config:
@@ -44,4 +47,5 @@ def load_config() -> Config:
         database_path=os.environ.get("DATABASE_PATH", "data/sleep.db"),
         include_naps_in_total=os.environ.get("INCLUDE_NAPS_IN_TOTAL", "false").lower() == "true",
         report_channel_id=int(os.environ["REPORT_CHANNEL_ID"]) if os.environ.get("REPORT_CHANNEL_ID", "").strip() else None,
+        preview_empty_stats=os.environ.get("PREVIEW_EMPTY_STATS", "true").lower() == "true",
     )
