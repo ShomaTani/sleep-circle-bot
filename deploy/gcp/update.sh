@@ -11,7 +11,7 @@ if [ "$(as_bot git rev-parse HEAD)" = "$(as_bot git rev-parse origin/main)" ] &&
   exit 0
 fi
 as_bot git reset -q --hard origin/main
-as_bot "$APP/.venv/bin/pip" install -q -r requirements.txt
+as_bot "$APP/.venv/bin/pip" install -q --no-cache-dir -r requirements.txt
 install -m 644 deploy/gcp/sleepbot.service deploy/gcp/sleepbot-update.service deploy/gcp/sleepbot-update.timer /etc/systemd/system/
 systemctl daemon-reload
 if [ -f "$APP/.env" ]; then

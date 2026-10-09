@@ -20,7 +20,7 @@ chown -R sleepbot:sleepbot "$APP"
 chmod 700 "$APP/data"
 
 runuser -u sleepbot -- python3 -m venv "$APP/.venv"
-runuser -u sleepbot -- "$APP/.venv/bin/pip" install -q -r "$APP/requirements.txt"
+runuser -u sleepbot -- "$APP/.venv/bin/pip" install -q --no-cache-dir -r "$APP/requirements.txt"
 runuser -u sleepbot -- "$APP/scripts/fetch_font.sh"
 
 # e2-micro はメモリ 1GB なので、念のためスワップを 1GB 足す
