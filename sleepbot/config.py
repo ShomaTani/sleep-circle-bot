@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import base64
+import binascii
 import os
 from dataclasses import dataclass
 from zoneinfo import ZoneInfo
@@ -28,6 +30,8 @@ class Config:
     # 実験フェーズ用: 記録がなくても /mystats で空の枠（画像）を出して見た目を確認できるようにする。
     # 本番では false にして、記録がなければ画像を作らずにメッセージだけ返す
     preview_empty_stats: bool = True
+    # 「おやすみ」中の入眠時刻を DB に暗号化して置くための鍵（32バイト）。未設定ならメモリだけ（再起動で消える）
+    pending_key: bytes | None = None
 
 
 def load_config() -> Config:
@@ -48,4 +52,17 @@ def load_config() -> Config:
         include_naps_in_total=os.environ.get("INCLUDE_NAPS_IN_TOTAL", "false").lower() == "true",
         report_channel_id=int(os.environ["REPORT_CHANNEL_ID"]) if os.environ.get("REPORT_CHANNEL_ID", "").strip() else None,
         preview_empty_stats=os.environ.get("PREVIEW_EMPTY_STATS", "true").lower() == "true",
+        pending_key=_pending_key(os.environ.get("PENDING_KEY", "").strip()),
     )
+
+
+def _pending_key(raw: str) -> bytes | None:
+    if not raw:
+        return None
+    try:
+        key = base64.b64decode(raw, validate=True)
+    except binascii.Error:
+        raise SystemExit("PENDING_KEY が base64 になっていません（README の作り方を参照）") from None
+    if len(key) != 32:
+        raise SystemExit("PENDING_KEY は 32 バイト（base64 で 44 文字）にしてください")
+    return key

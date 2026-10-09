@@ -35,7 +35,7 @@ class SleepBot(discord.Client):
         super().__init__(intents=intents)
         self.cfg = cfg
         self.db = Database(cfg.database_path)
-        self.pending = PendingSleeps()
+        self.pending = PendingSleeps(self.db, cfg.pending_key)
         self.unlock_limiter = UnlockLimiter()
         self.tree = SafeTree(self)
 
@@ -52,6 +52,8 @@ class SleepBot(discord.Client):
 
     async def on_ready(self) -> None:
         log.info("ready as %s", self.user)
+        if not self.pending.persistent:
+            log.warning("PENDING_KEY が未設定なので、おやすみ中の記録は再起動で消えます（README 参照）")
         if not isinstance(self.get_channel(self.cfg.category_id), discord.CategoryChannel):
             log.warning("CATEGORY_ID のカテゴリが見えません。Bot のロールに「チャンネルを見る」などを許可してください（README 参照）")
         if self.get_channel(self.cfg.stats_channel_id) is None:

@@ -51,11 +51,19 @@ GUILD_ID=（サーバー ID）
 STATS_CHANNEL_ID=（週次スタッツを投稿するチャンネル ID）
 CATEGORY_ID=（個人チャンネルを入れるカテゴリ ID）
 REPORT_CHANNEL_ID=（任意。リアルタイム共有の投稿先チャンネル ID。未設定ならリアルタイム共有は選べない）
+PENDING_KEY=（おやすみ中の入眠時刻を暗号化して一時保存する鍵。下のコマンドで作る。未設定だと再起動で消える）
+PREVIEW_EMPTY_STATS=true（実験フェーズ用。記録がなくても /mystats で空の枠を出す。本番では false）
 DATABASE_PATH=data/sleep.db
 INCLUDE_NAPS_IN_TOTAL=false
 ```
 
 `.env` は git に入れないでください（`.gitignore` 済み）。
+
+`PENDING_KEY` の作り方（サーバーごとに別の鍵を作る。DB のバックアップと一緒に置かない）:
+
+```bash
+python3 -c "import base64,os;print('PENDING_KEY='+base64.b64encode(os.urandom(32)).decode())"
+```
 
 ### 5. 起動
 

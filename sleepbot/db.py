@@ -1,7 +1,7 @@
 """SQLite への保存。
 
 時刻の漏洩を防ぐため次の点に注意している。
-- 入眠中の未完了セッションは保存しない（pending.py のメモリのみ）
+- 入眠中の未完了セッションは、サーバー鍵で暗号化して pending_sleeps に一時保存し、起床で消す（pending.py）
 - created_at / updated_at は「日付」だけを持つ。ボタン記録の作成時刻＝起床時刻になってしまうため
 - secure_delete を有効にし、削除した平文の時刻がファイルの空き領域に残らないようにする
 - ジャーナルは WAL を使わない（削除前のページが -wal ファイルに残るのを避ける）
@@ -46,6 +46,13 @@ CREATE TABLE IF NOT EXISTS sleep_records (
 );
 
 CREATE INDEX IF NOT EXISTS idx_records_user_date ON sleep_records(discord_id, sleep_date);
+
+-- 「おやすみ」中の入眠時刻。サーバー鍵（PENDING_KEY）で暗号化し、作成時刻などは持たない。
+-- 「おはよう」（または上書き・退会）で削除する。再起動しても寝ている人の記録が消えないようにするため
+CREATE TABLE IF NOT EXISTS pending_sleeps (
+    discord_id INTEGER PRIMARY KEY REFERENCES users(discord_id) ON DELETE CASCADE,
+    sealed     BLOB    NOT NULL
+);
 
 -- 週次スタッツの二重投稿防止。投稿前に週を「確保」し、失敗したら解放する
 CREATE TABLE IF NOT EXISTS weekly_posts (
@@ -178,9 +185,26 @@ class Database:
 
     def delete_user(self, discord_id: int) -> None:
         with self.conn:
+            self.conn.execute("DELETE FROM pending_sleeps WHERE discord_id = ?", (discord_id,))
             self.conn.execute("DELETE FROM sleep_records WHERE discord_id = ?", (discord_id,))
             self.conn.execute("DELETE FROM users WHERE discord_id = ?", (discord_id,))
         self.conn.execute("VACUUM")
+
+    # ---- pending_sleeps ----
+
+    def put_pending(self, discord_id: int, sealed: bytes) -> None:
+        with self.conn:
+            self.conn.execute(
+                "INSERT OR REPLACE INTO pending_sleeps (discord_id, sealed) VALUES (?, ?)", (discord_id, sealed)
+            )
+
+    def get_pending(self, discord_id: int) -> bytes | None:
+        row = self.conn.execute("SELECT sealed FROM pending_sleeps WHERE discord_id = ?", (discord_id,)).fetchone()
+        return row["sealed"] if row else None
+
+    def delete_pending(self, discord_id: int) -> None:
+        with self.conn:
+            self.conn.execute("DELETE FROM pending_sleeps WHERE discord_id = ?", (discord_id,))
 
     # ---- weekly_posts ----
 
