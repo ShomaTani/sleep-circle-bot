@@ -15,11 +15,14 @@ class Audience(Enum):
 class Field(Enum):
     DURATION = "duration"  # 睡眠時間（長さ）・記録日数・昼寝フラグ
     TIMES = "times"  # 入眠・起床時刻と、そこから推測できる値（平均時刻・ばらつき・規則性・睡眠帯）
+    REALTIME = "realtime"  # 就寝・起床をその場で共有チャンネル（REPORT_CHANNEL_ID）に投稿する
 
 
 def visible_fields(user: User, audience: Audience) -> frozenset[Field]:
     if audience is Audience.SELF:
         return frozenset({Field.DURATION, Field.TIMES})
+    if user.share_times and user.share_realtime:
+        return frozenset({Field.DURATION, Field.TIMES, Field.REALTIME})
     if user.share_times:
         return frozenset({Field.DURATION, Field.TIMES})
     return frozenset({Field.DURATION})

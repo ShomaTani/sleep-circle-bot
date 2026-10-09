@@ -132,10 +132,30 @@ class UnlockButtonView(SafeView):
 # ---------------------------------------------------------------- 公開設定
 
 
-async def change_privacy(bot: SleepBot, interaction: discord.Interaction, user: User, share: bool) -> None:
-    """/privacy と /join 直後の選択ボタンの共通処理。interaction.response で返事をする。"""
-    if share != user.share_times:
-        bot.db.set_share_times(user.discord_id, share)
+LEVELS = {
+    "duration": "睡眠時間だけ共有する",
+    "times": "時刻も共有する",
+    "realtime": "リアルタイムでも共有する",
+}
+
+
+def level_of(user: User) -> str:
+    if user.share_times and user.share_realtime:
+        return "realtime"
+    return "times" if user.share_times else "duration"
+
+
+async def change_privacy(bot: SleepBot, interaction: discord.Interaction, user: User, level: str) -> None:
+    """/privacy と /join 直後の選択ボタンの共通処理。interaction.response で返事をする。
+    level: duration（長さだけ）／times（時刻も週次で）／realtime（さらに就寝・起床をその場で投稿）"""
+    if level == "realtime" and bot.cfg.report_channel_id is None:
+        await interaction.response.send_message(
+            "リアルタイム共有は、いまは使えない設定になっているよ（管理者が REPORT_CHANNEL_ID を設定すると使えます）。",
+            ephemeral=True,
+        )
+        return
+    share = level != "duration"
+    bot.db.set_privacy(user.discord_id, share_times=share, share_realtime=level == "realtime")
 
     if not share:
         await interaction.response.send_message(
@@ -148,6 +168,11 @@ async def change_privacy(bot: SleepBot, interaction: discord.Interaction, user: 
 
     past = [r for r in bot.db.list_records(user.discord_id) if r.public_bedtime_utc is None]
     msg = "「時刻も共有する」にしたよ。これからの記録の入眠・起床時刻が、次回の週次スタッツから共有されます。"
+    if level == "realtime":
+        msg = (
+            f"「リアルタイムでも共有する」にしたよ。😴 / ☀️ を押すと <#{bot.cfg.report_channel_id}> に"
+            "「おやすみ」「おきた」と時刻が投稿されます。週次スタッツにも時刻が載ります。"
+        )
     if not past:
         await interaction.response.send_message(msg, ephemeral=True)
         return
@@ -173,20 +198,24 @@ class PrivacyView(SafeView):
         super().__init__(timeout=300)
         self.bot, self.owner_id = bot, owner_id
 
-    async def _choose(self, interaction: discord.Interaction, share: bool) -> None:
+    async def _choose(self, interaction: discord.Interaction, level: str) -> None:
         user = self.bot.db.get_user(interaction.user.id)
         if user is None or user.discord_id != self.owner_id:
             await interaction.response.send_message("本人だけが使えます。", ephemeral=True)
             return
-        await change_privacy(self.bot, interaction, user, share)
-
-    @discord.ui.button(label="時刻も共有する", style=discord.ButtonStyle.secondary)
-    async def times(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
-        await self._choose(interaction, True)
+        await change_privacy(self.bot, interaction, user, level)
 
     @discord.ui.button(label="睡眠時間だけ共有する", style=discord.ButtonStyle.primary)
     async def duration(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
-        await self._choose(interaction, False)
+        await self._choose(interaction, "duration")
+
+    @discord.ui.button(label="時刻も共有する", style=discord.ButtonStyle.secondary)
+    async def times(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
+        await self._choose(interaction, "times")
+
+    @discord.ui.button(label="リアルタイムでも共有する", style=discord.ButtonStyle.secondary)
+    async def realtime(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
+        await self._choose(interaction, "realtime")
 
 
 # ---------------------------------------------------------------- 確認ダイアログ
@@ -314,14 +343,17 @@ def register_phase2(bot: SleepBot) -> None:
             ephemeral=True,
         )
 
-    @bot.tree.command(name="privacy", description="入眠・起床時刻を共有するかどうかを変える")
+    @bot.tree.command(name="privacy", description="どこまで共有するかを変える（睡眠時間だけ／時刻も／リアルタイムでも）")
     async def privacy(interaction: discord.Interaction) -> None:
         user = await require_user(bot, interaction)
         if user is None:
             return
-        current = "時刻も共有する" if user.share_times else "睡眠時間だけ共有する"
         await interaction.response.send_message(
-            f"いまの設定: **{current}**\n変更は次回の週次スタッツから反映されます。",
+            f"いまの設定: **{LEVELS[level_of(user)]}**\n"
+            "・睡眠時間だけ共有する: 週次スタッツに睡眠時間（長さ）だけ載る\n"
+            "・時刻も共有する: 週次スタッツに入眠・起床の時刻も載る\n"
+            "・リアルタイムでも共有する: さらに、寝た・起きたをその場で投稿する\n"
+            "週次スタッツへの反映は次回の投稿からです。",
             view=PrivacyView(bot, user.discord_id),
             ephemeral=True,
         )

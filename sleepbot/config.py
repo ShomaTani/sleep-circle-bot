@@ -24,6 +24,7 @@ class Config:
     category_id: int
     database_path: str
     include_naps_in_total: bool
+    report_channel_id: int | None = None  # リアルタイム共有の投稿先（未設定なら無効）
 
 
 def load_config() -> Config:
@@ -42,4 +43,5 @@ def load_config() -> Config:
         category_id=int(required("CATEGORY_ID")),
         database_path=os.environ.get("DATABASE_PATH", "data/sleep.db"),
         include_naps_in_total=os.environ.get("INCLUDE_NAPS_IN_TOTAL", "false").lower() == "true",
+        report_channel_id=int(os.environ["REPORT_CHANNEL_ID"]) if os.environ.get("REPORT_CHANNEL_ID", "").strip() else None,
     )

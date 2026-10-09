@@ -23,6 +23,7 @@ CREATE TABLE IF NOT EXISTS users (
     channel_id            INTEGER,
     panel_message_id      INTEGER,
     share_times           INTEGER NOT NULL DEFAULT 0,
+    share_realtime        INTEGER NOT NULL DEFAULT 0,
     public_key            BLOB    NOT NULL,
     encrypted_private_key BLOB    NOT NULL,
     kdf_salt              BLOB    NOT NULL,
@@ -66,6 +67,7 @@ class User:
     kdf_salt: bytes
     kdf_params: str
     joined_at: str
+    share_realtime: bool = False  # True なら share_times も必ず True
 
 
 @dataclass(frozen=True)
@@ -107,7 +109,13 @@ class Database:
         self.conn.execute("PRAGMA secure_delete = ON")
         self.conn.execute("PRAGMA journal_mode = DELETE")
         self.conn.executescript(SCHEMA)
+        self._migrate()
         self.conn.commit()
+
+    def _migrate(self) -> None:
+        cols = {r["name"] for r in self.conn.execute("PRAGMA table_info(users)")}
+        if "share_realtime" not in cols:
+            self.conn.execute("ALTER TABLE users ADD COLUMN share_realtime INTEGER NOT NULL DEFAULT 0")
 
     def close(self) -> None:
         self.conn.close()
@@ -146,19 +154,27 @@ class Database:
         self.conn.execute("UPDATE users SET panel_message_id = ? WHERE discord_id = ?", (message_id, discord_id))
         self.conn.commit()
 
-    def set_share_times(self, discord_id: int, share: bool) -> None:
-        """公開設定を変える。非公開にしたら平文の時刻をすべて消す（暗号化済みの時刻は残る）。"""
+    def set_privacy(self, discord_id: int, share_times: bool, share_realtime: bool) -> None:
+        """公開設定を変える。リアルタイム共有は時刻共有が前提。
+        時刻共有をやめたら平文の時刻をすべて消す（暗号化済みの時刻は残る）。"""
+        share_realtime = share_realtime and share_times
         with self.conn:
-            self.conn.execute("UPDATE users SET share_times = ? WHERE discord_id = ?", (int(share), discord_id))
-            if not share:
+            self.conn.execute(
+                "UPDATE users SET share_times = ?, share_realtime = ? WHERE discord_id = ?",
+                (int(share_times), int(share_realtime), discord_id),
+            )
+            if not share_times:
                 self.conn.execute(
                     """UPDATE sleep_records SET public_bedtime_utc = NULL, public_waketime_utc = NULL
                        WHERE discord_id = ?""",
                     (discord_id,),
                 )
-        if not share:
+        if not share_times:
             # 空き領域に残った古いページも上書きして消す
             self.conn.execute("VACUUM")
+
+    def set_share_times(self, discord_id: int, share: bool) -> None:
+        self.set_privacy(discord_id, share, False)
 
     def delete_user(self, discord_id: int) -> None:
         with self.conn:
@@ -264,6 +280,7 @@ def _user(row: sqlite3.Row) -> User:
         kdf_salt=row["kdf_salt"],
         kdf_params=row["kdf_params"],
         joined_at=row["joined_at"],
+        share_realtime=bool(row["share_realtime"]),
     )
 
 

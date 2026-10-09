@@ -16,7 +16,7 @@ import discord
 from discord import app_commands
 from discord.ext import tasks
 
-from sleepbot import crypto
+from sleepbot import crypto, realtime
 from sleepbot.commands import UnlockLimiter, change_privacy, register_phase2
 from sleepbot.config import JST, MAX_SESSION_HOURS, Config, load_config
 from sleepbot.db import Database, User
@@ -207,8 +207,10 @@ async def finish_join(bot: SleepBot, interaction: discord.Interaction, keys: cry
         "・入眠・起床の時刻は、あなたのパスフレーズでしか復号できない形で保存されます（管理者も読めません）\n"
         "・**パスフレーズを忘れると、過去の時刻データは復元できません**（睡眠時間のデータは残ります）\n"
         "・睡眠時間（長さ）は全員に共有されます\n\n"
-        "まず、時刻を共有するかどうかを選んでください（あとから `/privacy` で変えられます）。\n"
-        "初期値は「睡眠時間だけ共有する」です。",
+        "まず、どこまで共有するかを選んでください（あとから `/privacy` で変えられます）。初期値は「睡眠時間だけ共有する」です。\n"
+        "・**睡眠時間だけ共有する**: 週次スタッツに睡眠時間（長さ）だけ載る\n"
+        "・**時刻も共有する**: 週次スタッツに入眠・起床の時刻も載る\n"
+        "・**リアルタイムでも共有する**: さらに、寝た・起きたをその場で共有チャンネルに投稿する",
         view=PrivacyChoiceView(bot),
     )
     await interaction.followup.send(f"{channel.mention} を作ったよ。", ephemeral=True)
@@ -227,29 +229,37 @@ class PrivacyChoiceView(SafeView):
         super().__init__(timeout=None)
         self.bot = bot
 
-    @discord.ui.button(label="時刻も共有する", style=discord.ButtonStyle.secondary, custom_id="sleepbot:privacy:times")
-    async def share_times(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
-        await self._choose(interaction, True)
-
+    # custom_id は既存メッセージのボタンと互換（times / duration は Phase 1 から）
     @discord.ui.button(
-        label="睡眠時間だけ共有する", style=discord.ButtonStyle.primary, custom_id="sleepbot:privacy:duration"
+        label="睡眠時間だけ共有する", style=discord.ButtonStyle.primary, custom_id="sleepbot:privacy:duration", row=0
     )
     async def duration_only(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
-        await self._choose(interaction, False)
+        await self._choose(interaction, "duration")
 
-    async def _choose(self, interaction: discord.Interaction, share: bool) -> None:
+    @discord.ui.button(label="時刻も共有する", style=discord.ButtonStyle.secondary, custom_id="sleepbot:privacy:times", row=0)
+    async def share_times(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
+        await self._choose(interaction, "times")
+
+    @discord.ui.button(
+        label="リアルタイムでも共有する", style=discord.ButtonStyle.secondary, custom_id="sleepbot:privacy:realtime", row=0
+    )
+    async def share_realtime(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
+        await self._choose(interaction, "realtime")
+
+    async def _choose(self, interaction: discord.Interaction, level: str) -> None:
         user = self.bot.owner_of_channel(interaction)
         if user is None:
             await interaction.response.send_message("このボタンはチャンネルの持ち主だけが使えます。", ephemeral=True)
             return
-        await change_privacy(self.bot, interaction, user, share)
+        await change_privacy(self.bot, interaction, user, level)
         if user.panel_message_id is None:
             await post_panel(self.bot, interaction.channel, user.discord_id)
 
 
 async def post_panel(bot: SleepBot, channel: discord.abc.Messageable, discord_id: int) -> None:
     msg = await channel.send(
-        "**睡眠記録パネル**\n寝るときに 😴、起きたら ☀️ を押してね。押したことは誰にも通知されません。",
+        "**睡眠記録パネル**\n寝るときに 😴、起きたら ☀️ を押してね。"
+        "「リアルタイムでも共有する」を選んでいなければ、押したことは誰にも通知されません。",
         view=RecordPanelView(bot),
     )
     await msg.pin(reason="sleep bot: record panel")
@@ -279,6 +289,7 @@ class RecordPanelView(SafeView):
             return
         self.bot.pending.start(user.discord_id, interaction.created_at)
         await interaction.response.send_message("おやすみなさい 🌙", ephemeral=True)
+        await realtime.post(self.bot, realtime.sleep_message(user, interaction.user.display_name, interaction.created_at))
 
     @discord.ui.button(label="おはよう", emoji="☀️", style=discord.ButtonStyle.success, custom_id="sleepbot:panel:wake")
     async def wake(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
@@ -311,6 +322,12 @@ class RecordPanelView(SafeView):
         if result.is_nap:
             text += "（3時間未満なので昼寝として記録したよ）"
         await interaction.response.send_message(text, ephemeral=True)
+        await realtime.post(
+            self.bot,
+            realtime.wake_message(
+                user, interaction.user.display_name, waketime, result.duration_minutes, result.is_nap
+            ),
+        )
 
 
 class ConfirmOverwriteView(SafeView):
@@ -323,6 +340,9 @@ class ConfirmOverwriteView(SafeView):
     async def overwrite(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
         self.bot.pending.start(self.discord_id, interaction.created_at)
         await interaction.response.edit_message(content="上書きしたよ。おやすみなさい 🌙", view=None)
+        user = self.bot.db.get_user(self.discord_id)
+        if user is not None:
+            await realtime.post(self.bot, realtime.sleep_message(user, interaction.user.display_name, interaction.created_at))
 
     @discord.ui.button(label="やめる", style=discord.ButtonStyle.secondary)
     async def cancel(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
