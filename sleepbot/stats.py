@@ -131,9 +131,27 @@ def format_clock(minutes: float | None) -> str:
 
 
 def period_range(period: str, today: date) -> tuple[date, date]:
-    """/mystats の期間。week=直近7日、month=直近30日（どちらも今日を含む）。"""
-    days = 7 if period == "week" else 30
-    return today - timedelta(days=days - 1), today
+    """/mystats の期間。week=直近7日（今日を含む）、month=今月の1日〜今日。"""
+    if period == "week":
+        return today - timedelta(days=6), today
+    return today.replace(day=1), today
+
+
+class InvalidMonth(ValueError):
+    pass
+
+
+def month_range(raw: str, today: date) -> tuple[date, date]:
+    """"YYYY-MM" の1か月分。今月なら今日まで。未来の月は不可。"""
+    try:
+        y, m = (int(x) for x in raw.strip().replace("/", "-").split("-"))
+        first = date(y, m, 1)
+    except ValueError:
+        raise InvalidMonth("月は YYYY-MM の形で入れてね（例: 2026-09）") from None
+    if first > today:
+        raise InvalidMonth("未来の月はまだ見られないよ")
+    nxt = date(y + (m == 12), m % 12 + 1, 1)
+    return first, min(nxt - timedelta(days=1), today)
 
 
 def previous_week(today: date) -> tuple[date, date]:

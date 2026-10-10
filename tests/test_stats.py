@@ -58,7 +58,20 @@ def test_naps_excluded_from_time_summary():
 
 def test_periods():
     assert period_range("week", date(2026, 10, 8)) == (date(2026, 10, 2), date(2026, 10, 8))
-    assert period_range("month", date(2026, 10, 8))[0] == date(2026, 9, 9)
+    assert period_range("month", date(2026, 10, 8)) == (date(2026, 10, 1), date(2026, 10, 8))
+
+
+def test_month_range():
+    from sleepbot.stats import InvalidMonth, month_range
+
+    today = date(2026, 10, 10)
+    assert month_range("2026-09", today) == (date(2026, 9, 1), date(2026, 9, 30))
+    assert month_range("2026/02", today) == (date(2026, 2, 1), date(2026, 2, 28))
+    assert month_range("2025-12", today) == (date(2025, 12, 1), date(2025, 12, 31))
+    assert month_range("2026-10", today) == (date(2026, 10, 1), today)  # 今月は今日まで
+    for bad in ("2026-11", "2026-13", "abc", "2026"):
+        with pytest.raises(InvalidMonth):
+            month_range(bad, today)
     # 2026-10-12 は月曜 → 前週 10/5(月)〜10/11(日)
     assert previous_week(date(2026, 10, 12)) == (date(2026, 10, 5), date(2026, 10, 11))
     assert previous_week(date(2026, 10, 14)) == (date(2026, 10, 5), date(2026, 10, 11))

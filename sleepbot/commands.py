@@ -28,7 +28,7 @@ from sleepbot.sleeplog import (
     parse_date,
     parse_manual,
 )
-from sleepbot.stats import duration_summary, format_clock, period_range, time_summary
+from sleepbot.stats import InvalidMonth, duration_summary, format_clock, month_range, period_range, time_summary
 from sleepbot.ui import SafeModal, SafeView
 
 if TYPE_CHECKING:
@@ -360,16 +360,24 @@ def register_phase2(bot: SleepBot) -> None:
             ephemeral=True,
         )
 
-    @bot.tree.command(name="mystats", description="自分のスタッツを見る（自分にだけ表示）")
-    @app_commands.describe(period="week=直近7日 / month=直近30日")
-    @app_commands.choices(
-        period=[app_commands.Choice(name="week", value="week"), app_commands.Choice(name="month", value="month")]
+    @bot.tree.command(name="mystats", description="自分のスタッツを見る（自分にだけ表示）。何も付けなければ今月")
+    @app_commands.describe(
+        month="過去の月を見る YYYY-MM（例: 2026-09）",
+        period="month=今月（初期値） / week=直近7日",
     )
-    async def mystats(interaction: discord.Interaction, period: str = "week") -> None:
+    @app_commands.choices(
+        period=[app_commands.Choice(name="month", value="month"), app_commands.Choice(name="week", value="week")]
+    )
+    async def mystats(interaction: discord.Interaction, month: str | None = None, period: str = "month") -> None:
         user = await require_user(bot, interaction)
         if user is None:
             return
-        start, end = period_range(period, datetime.now(JST).date())
+        today = datetime.now(JST).date()
+        try:
+            start, end = month_range(month, today) if month else period_range(period, today)
+        except InvalidMonth as e:
+            await interaction.response.send_message(str(e), ephemeral=True)
+            return
         records = bot.db.list_records(user.discord_id, start, end)
         text = duration_report(bot, records, start, end)
 
