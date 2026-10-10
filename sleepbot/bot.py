@@ -131,6 +131,37 @@ class SleepBot(discord.Client):
         if self.db.clear_public_times(stale):
             log.info("cleared plain times of members who stopped sharing")
 
+    async def post_weekly_if_due(self) -> None:
+        target = post_due(datetime.now(JST))
+        if target is None:
+            return
+        start, end = target
+        if not self.db.claim_week(start):
+            return  # 投稿済み（または別の起動が投稿中）
+        first = None
+        try:
+            members = load_members(self.db, start, end, self.cfg.include_naps_in_total)
+            if not has_any_record(members):
+                log.info("weekly stats skipped (no records) for week starting %s", start.isoformat())
+                return  # 確保したままにして、その週は二度と試さない
+            post = await asyncio.to_thread(render_post, members, start, end)
+            channel = self.get_channel(self.cfg.stats_channel_id) or await self.fetch_channel(self.cfg.stats_channel_id)
+            for text, files in post.messages:
+                msg = await channel.send(
+                    text,
+                    files=[discord.File(io.BytesIO(png), filename=name) for name, png in files],
+                    allowed_mentions=discord.AllowedMentions.none(),
+                )
+                first = first or msg
+            self.db.mark_week_posted(start, first.id if first else 0)
+            log.info("weekly stats posted for week starting %s", start.isoformat())
+            await self.clear_stale_plain_times()
+        except Exception as e:
+            # 1通も送れていなければ解放して次の機会に再挑戦。途中まで送れていたら二重投稿を避けて諦める
+            if first is None:
+                self.db.release_week(start)
+            log_exception("post_weekly", e)
+
     async def on_error(self, event_method: str, /, *args: object, **kwargs: object) -> None:
         import sys
 

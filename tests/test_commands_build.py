@@ -26,3 +26,17 @@ def test_commands_register(tmp_path):
         await bot.close()
 
     asyncio.run(run())
+
+
+def test_startup_jobs_run_without_network(tmp_path):
+    """on_ready で呼ぶ取りこぼし投稿の処理が存在し、記録ゼロなら何も投稿せずに終わること。"""
+
+    async def run():
+        cfg = Config("x", 1, 2, 3, str(tmp_path / "db.sqlite"), False)
+        bot = SleepBot(cfg)
+        await bot.post_weekly_if_due()
+        await bot.post_daily_if_due()
+        await bot.clear_stale_plain_times()
+        await bot.close()
+
+    asyncio.run(run())
