@@ -20,11 +20,13 @@ from sleepbot import crypto, realtime
 from sleepbot.commands import UnlockLimiter, change_privacy, register_phase2
 from sleepbot.config import JST, MAX_SESSION_HOURS, Config, load_config
 from sleepbot.db import Database, User
+from sleepbot.groups import member_groups
 from sleepbot.pending import PendingSleeps
 from sleepbot.safelog import log, log_exception, setup_logging
 from sleepbot.sleeplog import InvalidSession, format_duration, save_sleep
 from sleepbot.ui import SafeModal, SafeTree, SafeView
-from sleepbot.weekly import has_any_record, load_members, post_due, render_post
+from sleepbot.daily import daily_due, daily_key, daily_ranking
+from sleepbot.weekly import has_any_record, load_group_members, load_members, post_due, render_group_post, render_post
 
 REPO_URL = "https://github.com/ShomaTani/sleep-circle-bot"
 
@@ -49,6 +51,7 @@ class SleepBot(discord.Client):
         self.tree.copy_global_to(guild=guild)
         await self.tree.sync(guild=guild)
         self.weekly_job.start()
+        self.daily_job.start()
 
     async def on_ready(self) -> None:
         log.info("ready as %s", self.user)
@@ -58,8 +61,9 @@ class SleepBot(discord.Client):
             log.warning("CATEGORY_ID のカテゴリが見えません。Bot のロールに「チャンネルを見る」などを許可してください（README 参照）")
         if self.get_channel(self.cfg.stats_channel_id) is None:
             log.warning("STATS_CHANNEL_ID のチャンネルが見えません")
-        # 月曜 8:00 に止まっていた場合の取りこぼしを投稿する（投稿済みなら何もしない）
+        # 止まっていた場合の取りこぼしを投稿する（投稿済みなら何もしない）
         await self.post_weekly_if_due()
+        await self.post_daily_if_due()
 
     @tasks.loop(time=time(8, 0, tzinfo=JST))
     async def weekly_job(self) -> None:
@@ -73,6 +77,79 @@ class SleepBot(discord.Client):
     @weekly_job.error
     async def _weekly_error(self, error: BaseException) -> None:
         log_exception("weekly_job", error)
+
+    @tasks.loop(time=time(12, 0, tzinfo=JST))
+    async def daily_job(self) -> None:
+        await self.post_daily_if_due()
+
+    @daily_job.before_loop
+    async def _before_daily(self) -> None:
+        await self.wait_until_ready()
+
+    @daily_job.error
+    async def _daily_error(self, error: BaseException) -> None:
+        log_exception("daily_job", error)
+
+    async def post_daily_if_due(self) -> None:
+        day = daily_due(datetime.now(JST))
+        if day is None or not self.db.claim_key(daily_key(day)):
+            return
+        try:
+            text = daily_ranking(self.db, day, self.cfg.include_naps_in_total)
+            if text is None:
+                return  # 記録なし。確保したままにしてその日は試さない
+            channel = self.get_channel(self.cfg.stats_channel_id) or await self.fetch_channel(self.cfg.stats_channel_id)
+            await channel.send(text, allowed_mentions=discord.AllowedMentions.none())
+            log.info("daily ranking posted for %s", day.isoformat())
+        except Exception as e:
+            self.db.release_key(daily_key(day))
+            log_exception("post_daily", e)
+
+    async def group_member_ids(self) -> dict[int, frozenset[int]]:
+        """グループ（role_id）ごとに、そのロールを持つ参加者の discord_id。ロールは投稿の時点で確認する。"""
+        guild = self.get_guild(self.cfg.guild_id)
+        result: dict[int, set[int]] = {g.role_id: set() for g in self.cfg.groups}
+        if guild is None or not self.cfg.groups:
+            return {k: frozenset(v) for k, v in result.items()}
+        for u in self.db.list_users():
+            member = guild.get_member(u.discord_id)
+            if member is None:
+                try:
+                    member = await guild.fetch_member(u.discord_id)
+                except discord.HTTPException:
+                    continue
+            for g in member_groups(self.cfg.groups, member):
+                result[g.role_id].add(u.discord_id)
+        return {k: frozenset(v) for k, v in result.items()}
+
+    async def post_group_weekly(self, start, end) -> None:
+        """グループのチャンネルに、グループ内の時刻（週次）を投稿する。
+        あわせて、時刻共有もグループもやめた人の平文の時刻を消す。"""
+        ids_by_role = await self.group_member_ids()
+        in_any = frozenset().union(*ids_by_role.values()) if ids_by_role else frozenset()
+        stale = [u.discord_id for u in self.db.list_users() if not u.share_times and u.discord_id not in in_any]
+        if self.db.clear_public_times(stale):
+            log.info("cleared plain times of members who stopped sharing")
+        for g in self.cfg.groups:
+            key = f"group-{g.role_id}-{start.isoformat()}"
+            ids = ids_by_role.get(g.role_id, frozenset())
+            if not ids or not self.db.claim_key(key):
+                continue
+            try:
+                members = load_group_members(self.db, start, end, self.cfg.include_naps_in_total, ids)
+                if not any(m.public_sleeps for m in members):
+                    continue
+                post = await asyncio.to_thread(render_group_post, members, start, end)
+                channel = self.get_channel(g.channel_id) or await self.fetch_channel(g.channel_id)
+                for text, files in post.messages:
+                    await channel.send(
+                        text,
+                        files=[discord.File(io.BytesIO(png), filename=name) for name, png in files],
+                        allowed_mentions=discord.AllowedMentions.none(),
+                    )
+            except Exception as e:
+                self.db.release_key(key)
+                log_exception("post_group_weekly", e)
 
     async def post_weekly_if_due(self) -> None:
         target = post_due(datetime.now(JST))
@@ -98,6 +175,7 @@ class SleepBot(discord.Client):
                 first = first or msg
             self.db.mark_week_posted(start, first.id if first else 0)
             log.info("weekly stats posted for week starting %s", start.isoformat())
+            await self.post_group_weekly(start, end)
         except Exception as e:
             # 1通も送れていなければ解放して次の機会に再挑戦。途中まで送れていたら二重投稿を避けて諦める
             if first is None:
@@ -291,7 +369,7 @@ class RecordPanelView(SafeView):
             return
         self.bot.pending.start(user.discord_id, interaction.created_at)
         await interaction.response.send_message("おやすみなさい 🌙", ephemeral=True)
-        await realtime.post(self.bot, realtime.sleep_message(user, interaction.user.display_name, interaction.created_at))
+        await realtime.announce_sleep(self.bot, user, interaction.user, interaction.created_at)
 
     @discord.ui.button(label="おはよう", emoji="☀️", style=discord.ButtonStyle.success, custom_id="sleepbot:panel:wake")
     async def wake(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
@@ -316,7 +394,8 @@ class RecordPanelView(SafeView):
             )
             return
         try:
-            result = save_sleep(self.bot.db, user, bedtime, waketime, source="button")
+            in_group = bool(member_groups(self.bot.cfg.groups, interaction.user))
+            result = save_sleep(self.bot.db, user, bedtime, waketime, source="button", in_group=in_group)
         except InvalidSession as e:
             await interaction.response.send_message(str(e), ephemeral=True)
             return
@@ -324,11 +403,8 @@ class RecordPanelView(SafeView):
         if result.is_nap:
             text += "（3時間未満なので昼寝として記録したよ）"
         await interaction.response.send_message(text, ephemeral=True)
-        await realtime.post(
-            self.bot,
-            realtime.wake_message(
-                user, interaction.user.display_name, waketime, result.duration_minutes, result.is_nap
-            ),
+        await realtime.announce_wake(
+            self.bot, user, interaction.user, waketime, result.duration_minutes, result.is_nap
         )
 
 
@@ -344,7 +420,7 @@ class ConfirmOverwriteView(SafeView):
         await interaction.response.edit_message(content="上書きしたよ。おやすみなさい 🌙", view=None)
         user = self.bot.db.get_user(self.discord_id)
         if user is not None:
-            await realtime.post(self.bot, realtime.sleep_message(user, interaction.user.display_name, interaction.created_at))
+            await realtime.announce_sleep(self.bot, user, interaction.user, interaction.created_at)
 
     @discord.ui.button(label="やめる", style=discord.ButtonStyle.secondary)
     async def cancel(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:

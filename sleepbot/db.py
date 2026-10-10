@@ -180,6 +180,20 @@ class Database:
             # 空き領域に残った古いページも上書きして消す
             self.conn.execute("VACUUM")
 
+    def clear_public_times(self, discord_ids: list[int]) -> int:
+        """平文の時刻を消す（時刻共有もグループもやめた人の分）。消した件数を返す。"""
+        if not discord_ids:
+            return 0
+        with self.conn:
+            n = self.conn.executemany(
+                """UPDATE sleep_records SET public_bedtime_utc = NULL, public_waketime_utc = NULL
+                   WHERE discord_id = ? AND public_bedtime_utc IS NOT NULL""",
+                [(i,) for i in discord_ids],
+            ).rowcount
+        if n:
+            self.conn.execute("VACUUM")
+        return n
+
     def set_share_times(self, discord_id: int, share: bool) -> None:
         self.set_privacy(discord_id, share, False)
 
@@ -213,6 +227,16 @@ class Database:
         with self.conn:
             cur = self.conn.execute("INSERT OR IGNORE INTO weekly_posts (week_start) VALUES (?)", (week_start.isoformat(),))
         return cur.rowcount == 1
+
+    def claim_key(self, key: str) -> bool:
+        """週次以外（毎日のランキングなど）の二重投稿防止。key は "daily-YYYY-MM-DD" など。"""
+        with self.conn:
+            cur = self.conn.execute("INSERT OR IGNORE INTO weekly_posts (week_start) VALUES (?)", (key,))
+        return cur.rowcount == 1
+
+    def release_key(self, key: str) -> None:
+        with self.conn:
+            self.conn.execute("DELETE FROM weekly_posts WHERE week_start = ?", (key,))
 
     def release_week(self, week_start: date) -> None:
         with self.conn:

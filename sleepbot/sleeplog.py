@@ -41,24 +41,30 @@ def compute(bedtime_utc: datetime, waketime_utc: datetime) -> Computed:
     )
 
 
-def build_record(user: User, bedtime_utc: datetime, waketime_utc: datetime, source: str) -> tuple[NewRecord, Computed]:
-    """長さは平文、時刻は本人の公開鍵で暗号化。時刻共有ONのときだけ平文の時刻も持たせる。"""
+def build_record(
+    user: User, bedtime_utc: datetime, waketime_utc: datetime, source: str, in_group: bool = False
+) -> tuple[NewRecord, Computed]:
+    """長さは平文、時刻は本人の公開鍵で暗号化。
+    時刻共有ON、またはグループのロールを持つ（グループ内で時刻が共有される）ときだけ平文の時刻も持たせる。"""
     c = compute(bedtime_utc, waketime_utc)
+    plain = user.share_times or in_group
     rec = NewRecord(
         discord_id=user.discord_id,
         sleep_date=c.sleep_date,
         duration_minutes=c.duration_minutes,
         is_nap=c.is_nap,
         encrypted_times=crypto.seal_times(user.public_key, bedtime_utc, waketime_utc),
-        public_bedtime_utc=bedtime_utc if user.share_times else None,
-        public_waketime_utc=waketime_utc if user.share_times else None,
+        public_bedtime_utc=bedtime_utc if plain else None,
+        public_waketime_utc=waketime_utc if plain else None,
         source=source,
     )
     return rec, c
 
 
-def save_sleep(db: Database, user: User, bedtime_utc: datetime, waketime_utc: datetime, source: str) -> Computed:
-    rec, c = build_record(user, bedtime_utc, waketime_utc, source)
+def save_sleep(
+    db: Database, user: User, bedtime_utc: datetime, waketime_utc: datetime, source: str, in_group: bool = False
+) -> Computed:
+    rec, c = build_record(user, bedtime_utc, waketime_utc, source, in_group)
     db.add_record(rec)
     return c
 

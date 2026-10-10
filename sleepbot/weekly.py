@@ -47,11 +47,16 @@ class MemberWeek:
 
 
 def collect(
-    users: list[User], records_by_user: dict[int, list[SleepRecord]], include_naps: bool
+    users: list[User],
+    records_by_user: dict[int, list[SleepRecord]],
+    include_naps: bool,
+    audience: Audience = Audience.PUBLIC,
+    in_group_ids: frozenset[int] = frozenset(),
 ) -> list[MemberWeek]:
+    """audience=GROUP のときは in_group_ids（そのグループのロールを持つ人）の時刻も見える。"""
     members = []
     for u in users:
-        fields = visible_fields(u, Audience.PUBLIC)
+        fields = visible_fields(u, audience, in_group=u.discord_id in in_group_ids)
         recs = records_by_user.get(u.discord_id, [])
         dur = duration_summary(recs, include_naps) if Field.DURATION in fields else duration_summary([], include_naps)
         times = sleeps = None
@@ -71,7 +76,12 @@ def _ranked(items: list[tuple[str, str]]) -> list[str]:
     return [f"{MEDALS[i] if i < len(MEDALS) else f'{i + 1}.'} {name} {value}" for i, (name, value) in enumerate(items)]
 
 
-def build_sections(members: list[MemberWeek], start: date, end: date) -> list[tuple[str, str]]:
+PUBLIC_TIMES_HEADING = "**🕘 時刻（「時刻も共有する」を選んだ人のみ）**"
+
+
+def build_sections(
+    members: list[MemberWeek], start: date, end: date, times_heading: str = PUBLIC_TIMES_HEADING
+) -> list[tuple[str, str]]:
     """(見出しキー, 本文) のリスト。キーは "duration" か "times"（テストで中身を区別するため）。"""
     sections: list[tuple[str, str]] = []
     head = f"📊 **週次スタッツ {fmt_date(start)}〜{fmt_date(end)}**"
@@ -114,7 +124,7 @@ def build_sections(members: list[MemberWeek], start: date, end: date) -> list[tu
 
     # ---- 時刻（共有を選んだ人だけ）
     sharing = [m for m in members if m.times is not None and m.times.sleeps > 0]
-    lines = ["**🕘 時刻（「時刻も共有する」を選んだ人のみ）**"]
+    lines = [times_heading]
     if not sharing:
         lines.append("今週は時刻を共有している人の記録がありませんでした。")
     for m in sorted(sharing, key=lambda m: m.user.display_name):
@@ -174,7 +184,9 @@ def _blocks(body: str) -> list[str]:
     return out
 
 
-def build_figures(members: list[MemberWeek], start: date, end: date) -> dict:
+def build_figures(
+    members: list[MemberWeek], start: date, end: date, band_title: str = "睡眠帯（「時刻も共有する」を選んだ人のみ）"
+) -> dict:
     """{"duration": Figure, "times": Figure | None}。睡眠帯は public_sleeps を持つ人（時刻共有）だけ。"""
     with_records = sorted(
         (m for m in members if m.duration.record_days),
@@ -185,7 +197,7 @@ def build_figures(members: list[MemberWeek], start: date, end: date) -> dict:
     bands = (
         sleep_bands(
             [(m.user.display_name, m.public_sleeps) for m in sorted(sharing, key=lambda m: m.user.display_name)],
-            start, end, "睡眠帯（「時刻も共有する」を選んだ人のみ）",
+            start, end, band_title,
         )
         if sharing
         else None
@@ -214,6 +226,31 @@ def render_post(members: list[MemberWeek], start: date, end: date) -> WeeklyPost
             files = []
             if i == len(chunks) - 1 and figures.get(key) is not None:
                 files.append((f"{key}-{start.isoformat()}.png", to_png(figures[key])))
+            out.append((text, files))
+    return WeeklyPost(out)
+
+
+def load_group_members(
+    db: Database, start: date, end: date, include_naps: bool, group_ids: frozenset[int]
+) -> list[MemberWeek]:
+    """グループのチャンネル用。そのグループのロールを持つ人だけを、時刻まで見える形で集める。"""
+    users = [u for u in db.list_users() if u.discord_id in group_ids and u.joined_at <= end.isoformat()]
+    records = {u.discord_id: db.list_records(u.discord_id, start, end) for u in users}
+    return collect(users, records, include_naps, Audience.GROUP, group_ids)
+
+
+def render_group_post(members: list[MemberWeek], start: date, end: date) -> WeeklyPost:
+    """グループのチャンネルに出す時刻のセクションと睡眠帯。睡眠時間は全体のスタッツに出るので載せない。"""
+    heading = f"🕘 **グループ内の時刻 {fmt_date(start)}〜{fmt_date(end)}**"
+    sections = [kv for kv in build_sections(members, start, end, heading) if kv[0] == "times"]
+    figures = build_figures(members, start, end, "睡眠帯（グループ内）")
+    out: list[tuple[str, list[tuple[str, bytes]]]] = []
+    for key, body in sections:
+        chunks = split_messages([(key, body)])
+        for i, text in enumerate(chunks):
+            files = []
+            if i == len(chunks) - 1 and figures.get("times") is not None:
+                files.append((f"group-times-{start.isoformat()}.png", to_png(figures["times"])))
             out.append((text, files))
     return WeeklyPost(out)
 

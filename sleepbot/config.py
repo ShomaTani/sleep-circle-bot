@@ -19,6 +19,16 @@ MAX_SESSION_HOURS = 20
 
 
 @dataclass(frozen=True)
+class Group:
+    """ロール role_id を持つ人だけが見えるチャンネル channel_id。
+    ロールを持つ人は、このチャンネルの中では時刻まで自動で共有される（週次の時刻・リアルタイム）。
+    Bot はロールの意味（性別など）を知らず、この対応だけを持つ。"""
+
+    role_id: int
+    channel_id: int
+
+
+@dataclass(frozen=True)
 class Config:
     token: str
     guild_id: int
@@ -32,6 +42,7 @@ class Config:
     preview_empty_stats: bool = True
     # 「おやすみ」中の入眠時刻を DB に暗号化して置くための鍵（32バイト）。未設定ならメモリだけ（再起動で消える）
     pending_key: bytes | None = None
+    groups: tuple[Group, ...] = ()
 
 
 def load_config() -> Config:
@@ -53,7 +64,19 @@ def load_config() -> Config:
         report_channel_id=int(os.environ["REPORT_CHANNEL_ID"]) if os.environ.get("REPORT_CHANNEL_ID", "").strip() else None,
         preview_empty_stats=os.environ.get("PREVIEW_EMPTY_STATS", "true").lower() == "true",
         pending_key=_pending_key(os.environ.get("PENDING_KEY", "").strip()),
+        groups=parse_groups(os.environ.get("GROUPS", "")),
     )
+
+
+def parse_groups(raw: str) -> tuple[Group, ...]:
+    """"ロールID:チャンネルID,ロールID:チャンネルID" の形。"""
+    groups = []
+    for part in filter(None, (p.strip() for p in raw.split(","))):
+        role, _, channel = part.partition(":")
+        if not role.strip().isdigit() or not channel.strip().isdigit():
+            raise SystemExit("GROUPS は「ロールID:チャンネルID」をカンマ区切りで書いてください")
+        groups.append(Group(int(role), int(channel)))
+    return tuple(groups)
 
 
 def _pending_key(raw: str) -> bytes | None:

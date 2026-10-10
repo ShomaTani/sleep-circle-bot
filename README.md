@@ -51,6 +51,7 @@ GUILD_ID=（サーバー ID）
 STATS_CHANNEL_ID=（週次スタッツを投稿するチャンネル ID）
 CATEGORY_ID=（個人チャンネルを入れるカテゴリ ID）
 REPORT_CHANNEL_ID=（任意。リアルタイム共有の投稿先チャンネル ID。未設定ならリアルタイム共有は選べない）
+GROUPS=（任意。「ロールID:チャンネルID」をカンマ区切り。そのロールを持つ人は、そのチャンネルで時刻まで自動共有）
 PENDING_KEY=（おやすみ中の入眠時刻を暗号化して一時保存する鍵。下のコマンドで作る。未設定だと再起動で消える）
 PREVIEW_EMPTY_STATS=true（実験フェーズ用。記録がなくても /mystats で空の枠を出す。本番では false）
 DATABASE_PATH=data/sleep.db
@@ -93,7 +94,8 @@ python -m sleepbot.weekly            # 今週月曜に投稿される内容
 python -m sleepbot.weekly 2026-10-12 # その日を含む週の月曜に投稿される内容（画像は data/preview/ に保存）
 ```
 
-毎週月曜 8:00（JST）に前週（月〜日）分を `STATS_CHANNEL_ID` に投稿します。
+毎週月曜 8:00（JST）に前週（月〜日）分を `STATS_CHANNEL_ID` に投稿します（`GROUPS` があれば、各グループのチャンネルにグループ内の時刻も）。
+毎日 12:00（JST）には、今日起きた分の睡眠時間ランキングを `STATS_CHANNEL_ID` に投稿します。
 Bot が止まっていて 8:00 を逃した場合は、その週のうちに起動した時点で投稿します。投稿済みの週は DB に記録するので、再起動しても二重投稿しません。
 
 ## Google Cloud で常時動かす（無料枠）

@@ -15,6 +15,7 @@ from discord import app_commands
 from sleepbot import crypto
 from sleepbot.config import JST
 from sleepbot.db import SleepRecord, User
+from sleepbot.groups import member_groups
 from sleepbot.images import Sleep, month_calendar, sleep_bands, to_png
 from sleepbot.privacy import Audience, Field, visible_fields
 from sleepbot.sleeplog import (
@@ -301,7 +302,8 @@ def register_phase2(bot: SleepBot) -> None:
             return
         try:
             bed, wake = parse_manual(date, bedtime, waketime, interaction.created_at)
-            rec, c = build_record(user, bed, wake, source="manual")
+            in_group = bool(member_groups(bot.cfg.groups, interaction.user))
+            rec, c = build_record(user, bed, wake, source="manual", in_group=in_group)
         except (InvalidInput, InvalidSession) as e:
             await interaction.response.send_message(str(e), ephemeral=True)
             return
