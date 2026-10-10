@@ -21,6 +21,7 @@ from sleepbot.commands import UnlockLimiter, change_privacy, register_phase2
 from sleepbot.config import JST, MAX_SESSION_HOURS, Config, load_config
 from sleepbot.db import Database, User
 from sleepbot.groups import member_groups
+from sleepbot.guide import guide_text
 from sleepbot.pending import PendingSleeps
 from sleepbot.safelog import log, log_exception, setup_logging
 from sleepbot.sleeplog import InvalidSession, format_duration, save_sleep
@@ -281,16 +282,18 @@ async def finish_join(bot: SleepBot, interaction: discord.Interaction, keys: cry
         await channel.delete(reason="sleep bot: /join failed")
         raise
 
+    # 使い方の案内（消えない通常メッセージ。ピン留めして、いつでも見返せるようにする）
+    welcome = await channel.send(
+        f"{member.mention} ようこそ！ここはあなた専用の記録チャンネルです。\n\n" + guide_text(bot.cfg),
+        allowed_mentions=discord.AllowedMentions(users=[member]),
+        suppress_embeds=True,
+    )
+    await welcome.pin(reason="sleep bot: guide")
     await channel.send(
-        f"{member.mention} ようこそ！ここはあなた専用の記録チャンネルです。\n\n"
-        "**大事なこと**\n"
-        "・入眠・起床の時刻は、あなたのパスフレーズでしか復号できない形で保存されます（管理者も読めません）\n"
-        "・**パスフレーズを忘れると、過去の時刻データは復元できません**（睡眠時間のデータは残ります）\n"
-        "・睡眠時間（長さ）は全員に共有されます\n\n"
-        "まず、どこまで共有するかを選んでください（あとから `/privacy` で変えられます）。初期値は「睡眠時間だけ共有する」です。\n"
-        "・**睡眠時間だけ共有する**: 週次スタッツに睡眠時間（長さ）だけ載る\n"
-        "・**時刻も共有する**: 週次スタッツに入眠・起床の時刻も載る\n"
-        "・**リアルタイムでも共有する**: さらに、寝た・起きたをその場で共有チャンネルに投稿する",
+        "**まず、どこまで共有するかを選んでね**（あとから `/privacy` で変えられます。初期値は「睡眠時間だけ」）\n"
+        "・**睡眠時間だけ共有する**: 全体には睡眠時間（長さ）だけ\n"
+        "・**時刻も共有する**: 週次スタッツに寝た・起きた時刻も載る\n"
+        "・**リアルタイムでも共有する**: さらに、寝た・起きたをその場で投稿する",
         view=PrivacyChoiceView(bot),
     )
     await interaction.followup.send(f"{channel.mention} を作ったよ。", ephemeral=True)
@@ -453,6 +456,10 @@ def register_commands(bot: SleepBot) -> None:
             await interaction.response.send_message("もう参加済みだよ。", ephemeral=True)
             return
         await interaction.response.send_modal(PassphraseModal(bot))
+
+    @bot.tree.command(name="guide", description="使い方の案内をもう一度見る（自分にだけ表示）")
+    async def guide(interaction: discord.Interaction) -> None:
+        await interaction.response.send_message(guide_text(bot.cfg), ephemeral=True, suppress_embeds=True)
 
     @bot.tree.command(name="about", description="この Bot のソースコードと、いま動いているバージョン")
     async def about(interaction: discord.Interaction) -> None:
