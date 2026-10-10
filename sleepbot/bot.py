@@ -27,7 +27,7 @@ from sleepbot.safelog import log, log_exception, setup_logging
 from sleepbot.sleeplog import InvalidSession, format_duration, save_sleep
 from sleepbot.ui import SafeModal, SafeTree, SafeView
 from sleepbot.daily import daily_due, daily_key, daily_ranking
-from sleepbot.weekly import has_any_record, load_group_members, load_members, post_due, render_group_post, render_post
+from sleepbot.weekly import has_any_record, load_members, post_due, render_post
 
 REPO_URL = "https://github.com/ShomaTani/sleep-circle-bot"
 
@@ -123,65 +123,13 @@ class SleepBot(discord.Client):
                 result[g.role_id].add(u.discord_id)
         return {k: frozenset(v) for k, v in result.items()}
 
-    async def post_group_weekly(self, start, end) -> None:
-        """グループのチャンネルに、グループ内の時刻（週次）を投稿する。
-        あわせて、時刻共有もグループもやめた人の平文の時刻を消す。"""
+    async def clear_stale_plain_times(self) -> None:
+        """時刻共有もグループもやめた人（ロールを外れた人を含む）の平文の時刻を消す。週次処理のときに行う。"""
         ids_by_role = await self.group_member_ids()
         in_any = frozenset().union(*ids_by_role.values()) if ids_by_role else frozenset()
         stale = [u.discord_id for u in self.db.list_users() if not u.share_times and u.discord_id not in in_any]
         if self.db.clear_public_times(stale):
             log.info("cleared plain times of members who stopped sharing")
-        for g in self.cfg.groups:
-            key = f"group-{g.role_id}-{start.isoformat()}"
-            ids = ids_by_role.get(g.role_id, frozenset())
-            if not ids or not self.db.claim_key(key):
-                continue
-            try:
-                members = load_group_members(self.db, start, end, self.cfg.include_naps_in_total, ids)
-                if not any(m.public_sleeps for m in members):
-                    continue
-                post = await asyncio.to_thread(render_group_post, members, start, end)
-                channel = self.get_channel(g.channel_id) or await self.fetch_channel(g.channel_id)
-                for text, files in post.messages:
-                    await channel.send(
-                        text,
-                        files=[discord.File(io.BytesIO(png), filename=name) for name, png in files],
-                        allowed_mentions=discord.AllowedMentions.none(),
-                    )
-            except Exception as e:
-                self.db.release_key(key)
-                log_exception("post_group_weekly", e)
-
-    async def post_weekly_if_due(self) -> None:
-        target = post_due(datetime.now(JST))
-        if target is None:
-            return
-        start, end = target
-        if not self.db.claim_week(start):
-            return  # 投稿済み（または別の起動が投稿中）
-        first = None
-        try:
-            members = load_members(self.db, start, end, self.cfg.include_naps_in_total)
-            if not has_any_record(members):
-                log.info("weekly stats skipped (no records) for week starting %s", start.isoformat())
-                return  # 確保したままにして、その週は二度と試さない
-            post = await asyncio.to_thread(render_post, members, start, end)
-            channel = self.get_channel(self.cfg.stats_channel_id) or await self.fetch_channel(self.cfg.stats_channel_id)
-            for text, files in post.messages:
-                msg = await channel.send(
-                    text,
-                    files=[discord.File(io.BytesIO(png), filename=name) for name, png in files],
-                    allowed_mentions=discord.AllowedMentions.none(),
-                )
-                first = first or msg
-            self.db.mark_week_posted(start, first.id if first else 0)
-            log.info("weekly stats posted for week starting %s", start.isoformat())
-            await self.post_group_weekly(start, end)
-        except Exception as e:
-            # 1通も送れていなければ解放して次の機会に再挑戦。途中まで送れていたら二重投稿を避けて諦める
-            if first is None:
-                self.db.release_week(start)
-            log_exception("post_weekly", e)
 
     async def on_error(self, event_method: str, /, *args: object, **kwargs: object) -> None:
         import sys

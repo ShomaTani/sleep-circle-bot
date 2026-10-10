@@ -1,6 +1,5 @@
-"""リアルタイム共有: 就寝・起床をその場で投稿する。
-- 全体（REPORT_CHANNEL_ID）: 「リアルタイムでも共有する」を選んだ人だけ
-- グループ（GROUPS のチャンネル）: そのグループのロールを持つ人（自動で共有）
+"""リアルタイム共有: 「リアルタイムでも共有する」を選んだ人の就寝・起床を REPORT_CHANNEL_ID に投稿する。
+（グループ内の共有はチャンネルに出さず、/group の本人にだけ見える返事で見る）
 
 投稿してよいかは visible_fields() の Field.REALTIME だけで決める。手入力（/edit）は投稿しない。
 """
@@ -14,7 +13,6 @@ import discord
 
 from sleepbot.config import JST
 from sleepbot.db import User
-from sleepbot.groups import member_groups
 from sleepbot.privacy import Audience, Field, visible_fields
 from sleepbot.safelog import log, log_exception
 from sleepbot.sleeplog import format_duration
@@ -52,10 +50,9 @@ def wake_message(
     return f"☀️ **{safe_name(name)}** がおきた（{_clock(at)}・{format_duration(duration_minutes)}{nap}）"
 
 
-async def post(bot: SleepBot, text: str | None, channel_id: int | None = None) -> None:
-    """投稿に失敗してもボタンの処理は止めない。ログに時刻や名前は出さない。
-    channel_id を省くと全体の REPORT_CHANNEL_ID に投稿する。"""
-    channel_id = channel_id or bot.cfg.report_channel_id
+async def post(bot: SleepBot, text: str | None) -> None:
+    """投稿に失敗してもボタンの処理は止めない。ログに時刻や名前は出さない。"""
+    channel_id = bot.cfg.report_channel_id
     if text is None or channel_id is None:
         return
     try:
@@ -67,16 +64,10 @@ async def post(bot: SleepBot, text: str | None, channel_id: int | None = None) -
 
 
 async def announce_sleep(bot: SleepBot, user: User, member: discord.abc.User, at: datetime) -> None:
-    name = member.display_name
-    await post(bot, sleep_message(user, name, at))
-    for g in member_groups(bot.cfg.groups, member):
-        await post(bot, sleep_message(user, name, at, Audience.GROUP, in_group=True), g.channel_id)
+    await post(bot, sleep_message(user, member.display_name, at))
 
 
 async def announce_wake(
     bot: SleepBot, user: User, member: discord.abc.User, at: datetime, duration_minutes: int, is_nap: bool
 ) -> None:
-    name = member.display_name
-    await post(bot, wake_message(user, name, at, duration_minutes, is_nap))
-    for g in member_groups(bot.cfg.groups, member):
-        await post(bot, wake_message(user, name, at, duration_minutes, is_nap, Audience.GROUP, in_group=True), g.channel_id)
+    await post(bot, wake_message(user, member.display_name, at, duration_minutes, is_nap))

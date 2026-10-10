@@ -14,7 +14,7 @@ def test_commands_register(tmp_path):
         register_commands(bot)
         register_phase2(bot)
         names = {c.name for c in bot.tree.get_commands()}
-        assert names == {"join", "guide", "about", "edit", "delete", "privacy", "mystats", "leave"}
+        assert names == {"join", "guide", "about", "edit", "delete", "privacy", "mystats", "group", "leave"}
         # Persistent View は custom_id が固定で timeout なし
         view = RecordPanelView(bot)
         assert view.is_persistent()

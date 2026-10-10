@@ -1,4 +1,4 @@
-"""/edit /delete /privacy /leave /mystats。返信はすべて ephemeral。"""
+"""/edit /delete /privacy /leave /mystats /group。返信はすべて ephemeral。"""
 
 from __future__ import annotations
 
@@ -6,7 +6,7 @@ import asyncio
 import io
 import time
 from collections.abc import Awaitable, Callable
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import TYPE_CHECKING
 
 import discord
@@ -16,6 +16,7 @@ from sleepbot import crypto
 from sleepbot.config import JST
 from sleepbot.db import SleepRecord, User
 from sleepbot.groups import member_groups
+from sleepbot.groupview import group_status_text
 from sleepbot.images import Sleep, month_calendar, sleep_bands, to_png
 from sleepbot.privacy import Audience, Field, visible_fields
 from sleepbot.sleeplog import (
@@ -30,6 +31,7 @@ from sleepbot.sleeplog import (
 )
 from sleepbot.stats import InvalidMonth, duration_summary, format_clock, month_range, period_range, time_summary
 from sleepbot.ui import SafeModal, SafeView
+from sleepbot.weekly import load_group_members, render_group_post
 
 if TYPE_CHECKING:
     from sleepbot.bot import SleepBot
@@ -429,6 +431,34 @@ def register_phase2(bot: SleepBot) -> None:
             view=UnlockButtonView(bot, user.discord_id, "🔒 時刻も見る", records, show_times),
             ephemeral=True,
         )
+
+    @bot.tree.command(name="group", description="同じロールの人の寝た・起きた時刻と時刻スタッツを見る（自分にだけ表示）")
+    @app_commands.describe(week="this=今週（初期値） / last=先週")
+    @app_commands.choices(
+        week=[app_commands.Choice(name="this", value="this"), app_commands.Choice(name="last", value="last")]
+    )
+    async def group(interaction: discord.Interaction, week: str = "this") -> None:
+        user = await require_user(bot, interaction)
+        if user is None:
+            return
+        mine = member_groups(bot.cfg.groups, interaction.user)
+        if not mine:
+            await interaction.response.send_message(
+                "グループのロールを持っていないので見られないよ（2つ以上のグループのロールを持っている場合も見られません）。",
+                ephemeral=True,
+            )
+            return
+        await interaction.response.defer(ephemeral=True, thinking=True)
+        ids = (await bot.group_member_ids()).get(mine[0].role_id, frozenset())
+        today = datetime.now(JST).date()
+        monday = today - timedelta(days=today.weekday())
+        start, end = (monday, today) if week == "this" else (monday - timedelta(days=7), monday - timedelta(days=1))
+        status = group_status_text(bot.db, bot.pending, ids, today)
+        members = load_group_members(bot.db, start, end, bot.cfg.include_naps_in_total, ids)
+        post = await asyncio.to_thread(render_group_post, members, start, end)
+        files = [discord.File(io.BytesIO(png), filename=name) for _, fs in post.messages for name, png in fs]
+        body = "\n\n".join([status, *(text for text, _ in post.messages)])
+        await interaction.followup.send(clip(body), files=files, ephemeral=True)
 
     @bot.tree.command(name="leave", description="退会する（個人チャンネルと全記録を削除）")
     async def leave(interaction: discord.Interaction) -> None:

@@ -14,8 +14,10 @@ def guide_text(cfg: Config) -> str:
         f"・毎週月曜 8:00: 先週のスタッツ（{stats}）",
     ]
     if cfg.groups:
-        chans = "／".join(f"<#{g.channel_id}>" for g in cfg.groups)
-        extras.append(f"・ロールを持つ人: そのロールのチャンネル（{chans}）で、寝た・起きた時刻と週次の時刻スタッツを自動で共有")
+        extras.append(
+            "・Boys／Girls などのロールを持つ人: `/group` で、同じロールの人の寝た・起きた時刻と今週の時刻スタッツが見られる"
+            "（自分にしか見えない。同じロールの人どうしでは時刻が自動で共有される）"
+        )
     if cfg.report_channel_id:
         extras.append(f"・`/privacy` でリアルタイム共有を選んだ人: 寝た・起きたを <#{cfg.report_channel_id}> に投稿")
 

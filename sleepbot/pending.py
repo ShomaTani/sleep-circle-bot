@@ -45,6 +45,19 @@ class PendingSleeps:
         payload = json.dumps({"id": discord_id, "bed": bedtime_utc.isoformat()}).encode()
         self._db.put_pending(discord_id, bytes(self._box.encrypt(payload)))
 
+    def peek(self, discord_id: int) -> datetime | None:
+        """消さずに見る（/group の「いま寝ている人」用）。"""
+        if self._box is None:
+            return self._memory.get(discord_id)
+        sealed = self._db.get_pending(discord_id)
+        if sealed is None:
+            return None
+        try:
+            payload = json.loads(self._box.decrypt(sealed))
+        except (CryptoError, ValueError):
+            return None
+        return datetime.fromisoformat(payload["bed"]) if payload.get("id") == discord_id else None
+
     def pop(self, discord_id: int) -> datetime | None:
         if self._box is None:
             return self._memory.pop(discord_id, None)

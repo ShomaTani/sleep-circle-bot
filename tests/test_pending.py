@@ -82,3 +82,14 @@ def test_memory_only_without_key(db):
     assert db.conn.execute("SELECT COUNT(*) FROM pending_sleeps").fetchone()[0] == 0
     assert PendingSleeps(db, None).pop(1) is None  # 再起動で消える
     assert p.pop(1) == BED
+
+
+def test_peek_does_not_remove(db):
+    make_user(db, 1, share_times=False)
+    p = PendingSleeps(db, KEY)
+    p.start(1, BED)
+    assert p.peek(1) == BED and p.has(1)
+    assert PendingSleeps(db, os.urandom(32)).peek(1) is None
+    m = PendingSleeps()
+    m.start(1, BED)
+    assert m.peek(1) == BED and m.has(1)

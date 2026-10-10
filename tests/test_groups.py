@@ -114,3 +114,44 @@ def test_daily_due():
     assert daily_due(jst(2026, 10, 10, 11, 59)) is None
     assert daily_due(jst(2026, 10, 10, 12, 0)) == date(2026, 10, 10)
     assert daily_due(jst(2026, 10, 10, 23, 59)) == date(2026, 10, 10)
+
+
+# ---- /group（本人にだけ見える返事）
+
+
+def test_parse_groups_role_only():
+    gs = parse_groups("111,333:444")
+    assert [(g.role_id, g.channel_id) for g in gs] == [(111, None), (333, 444)]
+
+
+def test_multi_group_members_are_excluded():
+    from sleepbot.groups import groups_for_roles
+
+    gs = parse_groups("10,11")
+    assert [g.role_id for g in groups_for_roles(gs, [10, 99])] == [10]
+    assert groups_for_roles(gs, [10, 11]) == []  # 両方持つ人はどちらにも数えない
+    assert groups_for_roles(gs, [99]) == []
+
+
+def test_group_status_shows_only_group_members(setup):
+    import os
+
+    from sleepbot.groupview import group_status_text
+    from sleepbot.pending import PendingSleeps
+
+    p = PendingSleeps(setup, os.urandom(32))
+    p.start(1, jst(2026, 10, 11, 23, 29))
+    p.start(2, jst(2026, 10, 11, 23, 51))  # グループ外の人
+    text = group_status_text(setup, p, frozenset({1}), date(2026, 10, 11))
+    assert "グループさん（23:29〜）" in text
+    assert "22:17 → 5:43" in text  # 今日起きた分
+    assert "ソトさん" not in text and "23:51" not in text
+    assert p.has(1)  # 見るだけで消さない
+
+
+def test_group_status_empty_for_outsider(setup):
+    from sleepbot.groupview import group_status_text
+    from sleepbot.pending import PendingSleeps
+
+    text = group_status_text(setup, PendingSleeps(), frozenset(), date(2026, 10, 11))
+    assert "グループさん" not in text and "・いない" in text and "・まだいない" in text

@@ -20,12 +20,12 @@ MAX_SESSION_HOURS = 20
 
 @dataclass(frozen=True)
 class Group:
-    """ロール role_id を持つ人だけが見えるチャンネル channel_id。
-    ロールを持つ人は、このチャンネルの中では時刻まで自動で共有される（週次の時刻・リアルタイム）。
-    Bot はロールの意味（性別など）を知らず、この対応だけを持つ。"""
+    """ロール role_id を持つ人どうしで、時刻まで共有するグループ（/group で本人にだけ表示）。
+    Bot はロールの意味（性別など）を知らず、ロール ID だけを持つ。
+    channel_id は以前の設定との互換のために読むだけで、使わない（グループの情報はチャンネルに投稿しない）。"""
 
     role_id: int
-    channel_id: int
+    channel_id: int | None = None
 
 
 @dataclass(frozen=True)
@@ -69,13 +69,14 @@ def load_config() -> Config:
 
 
 def parse_groups(raw: str) -> tuple[Group, ...]:
-    """"ロールID:チャンネルID,ロールID:チャンネルID" の形。"""
+    """"ロールID,ロールID" の形（以前の "ロールID:チャンネルID" も読める。チャンネルは使わない）。"""
     groups = []
     for part in filter(None, (p.strip() for p in raw.split(","))):
         role, _, channel = part.partition(":")
-        if not role.strip().isdigit() or not channel.strip().isdigit():
-            raise SystemExit("GROUPS は「ロールID:チャンネルID」をカンマ区切りで書いてください")
-        groups.append(Group(int(role), int(channel)))
+        role, channel = role.strip(), channel.strip()
+        if not role.isdigit() or (channel and not channel.isdigit()):
+            raise SystemExit("GROUPS はロール ID をカンマ区切りで書いてください")
+        groups.append(Group(int(role), int(channel) if channel else None))
     return tuple(groups)
 
 
