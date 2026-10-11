@@ -32,3 +32,11 @@ def test_rejects_reverse_and_too_long():
 def test_format_duration():
     assert format_duration(402) == "6時間42分"
     assert format_duration(42) == "42分"
+
+
+def test_duration_matches_displayed_minutes():
+    # 0:54:50 → 7:05:10（JST）。表示は 0:54 → 7:05 なので 6時間11分
+    c = compute(utc(2026, 10, 10, 15, 54, 50), utc(2026, 10, 10, 22, 5, 10))
+    assert c.duration_minutes == 6 * 60 + 11
+    c = compute(utc(2026, 10, 10, 15, 54, 0), utc(2026, 10, 10, 22, 5, 59))
+    assert c.duration_minutes == 6 * 60 + 11

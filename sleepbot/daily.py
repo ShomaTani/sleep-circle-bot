@@ -41,7 +41,7 @@ def daily_ranking(db: Database, day: date, include_naps: bool) -> str | None:
     if not rows:
         return None
     rows.sort(key=lambda r: (-r[0], r[1]))
-    lines = [f"🛌 **今日の睡眠ランキング {fmt_date(day)}**（今日起きた分）"]
+    lines = [f"🛌 **今日の睡眠ランキング {fmt_date(day)}**"]
     for i, (minutes, name) in enumerate(rows):
         mark = MEDALS[i] if i < len(MEDALS) else f"{i + 1}."
         lines.append(f"{mark} {safe_name(name)} {format_duration(minutes)}")

@@ -26,13 +26,19 @@ class Computed:
     is_nap: bool
 
 
+def _to_minute(dt: datetime) -> datetime:
+    return dt.replace(second=0, microsecond=0)
+
+
 def compute(bedtime_utc: datetime, waketime_utc: datetime) -> Computed:
     delta = waketime_utc - bedtime_utc
     if delta <= timedelta(0):
         raise InvalidSession("起床が入眠より前になっています")
     if delta >= timedelta(hours=MAX_SESSION_HOURS):
         raise InvalidSession(f"{MAX_SESSION_HOURS}時間以上の睡眠は記録できません")
-    minutes = int(delta.total_seconds() // 60)
+    # 表示する時刻（秒は切り捨て）どうしの差と必ず一致するよう、分に切り捨ててから引く
+    # 例: 0:54:50 → 7:05:10 は 0:54 → 7:05 と表示されるので 6時間11分
+    minutes = int((_to_minute(waketime_utc) - _to_minute(bedtime_utc)).total_seconds() // 60)
     return Computed(
         # 1回の睡眠は「起床した日」(JST) の記録
         sleep_date=waketime_utc.astimezone(JST).date(),
