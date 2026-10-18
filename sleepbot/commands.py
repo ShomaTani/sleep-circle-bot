@@ -291,12 +291,12 @@ def times_report(timed: list[TimedRecord]) -> str:
 
 
 def register_phase2(bot: SleepBot) -> None:
-    @bot.tree.command(name="edit", description="指定日の記録を手入力で登録・修正する（日付は起きた日）")
+    @bot.tree.command(name="edit", description="記録を手入力で登録・修正する（日付は起きた日。昼寝は追加、夜の睡眠は置き換え）")
     @app_commands.describe(
         date="起きた日 YYYY-MM-DD",
         bedtime="寝た時刻 HH:MM（起床より遅い時刻なら前日の夜とみなす）",
         waketime="起きた時刻 HH:MM",
-        add="その日の記録を置き換えずに追加する（昼寝など）",
+        add="夜の睡眠を置き換えずに追加する（分けて寝た日など。昼寝は付けなくても追加される）",
     )
     async def edit(interaction: discord.Interaction, date: str, bedtime: str, waketime: str, add: bool = False) -> None:
         user = await require_user(bot, interaction)
@@ -309,12 +309,14 @@ def register_phase2(bot: SleepBot) -> None:
         except (InvalidInput, InvalidSession) as e:
             await interaction.response.send_message(str(e), ephemeral=True)
             return
-        if add:
+        if add or c.is_nap:
+            # 昼寝は常に追加（その日の夜の睡眠を消さない）
             bot.db.add_record(rec)
             note = "（追加）"
         else:
+            # 夜の睡眠だけを置き換える。昼寝は残る
             removed = bot.db.replace_day(rec)
-            note = f"（前の記録 {removed} 件を置き換え）" if removed else ""
+            note = f"（前の夜の睡眠 {removed} 件を置き換え）" if removed else ""
         nap = "・昼寝" if c.is_nap else ""
         await interaction.response.send_message(
             f"{fmt_date(c.sleep_date)} の記録を登録したよ: {format_duration(c.duration_minutes)}{nap}{note}",

@@ -255,11 +255,12 @@ class Database:
             return self._insert(rec)
 
     def replace_day(self, rec: NewRecord) -> int:
-        """その日の記録をすべて消して rec に置き換える。消した件数を返す。"""
+        """その日の、rec と同じ種類（夜の睡眠／昼寝）の記録を消して rec に置き換える。消した件数を返す。
+        夜の睡眠を直しても昼寝は残り、昼寝を直しても夜の睡眠は残る。"""
         with self.conn:
             removed = self.conn.execute(
-                "DELETE FROM sleep_records WHERE discord_id = ? AND sleep_date = ?",
-                (rec.discord_id, rec.sleep_date.isoformat()),
+                "DELETE FROM sleep_records WHERE discord_id = ? AND sleep_date = ? AND is_nap = ?",
+                (rec.discord_id, rec.sleep_date.isoformat(), int(rec.is_nap)),
             ).rowcount
             self._insert(rec)
         return removed

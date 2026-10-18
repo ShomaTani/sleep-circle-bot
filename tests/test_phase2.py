@@ -50,14 +50,24 @@ def test_replace_day_and_add(db):
     save_sleep(db, u, jst(2026, 10, 7, 23), jst(2026, 10, 8, 6), "button")
     save_sleep(db, u, jst(2026, 10, 8, 13), jst(2026, 10, 8, 14), "button")  # 昼寝
     rec, _ = build_record(u, *parse_manual("2026-10-08", "23:30", "07:30", NOW), source="manual")
-    assert db.replace_day(rec) == 2
+    assert db.replace_day(rec) == 1  # 夜の睡眠だけ置き換え、昼寝は残る
     recs = db.list_records(1)
-    assert len(recs) == 1 and recs[0].duration_minutes == 480 and recs[0].source == "manual"
-    nap, _ = build_record(u, *parse_manual("2026-10-08", "13:00", "14:00", NOW), source="manual")
+    assert sorted((r.duration_minutes, r.is_nap) for r in recs) == [(60, True), (480, False)]
+    nap, _ = build_record(u, *parse_manual("2026-10-08", "15:00", "15:40", NOW), source="manual")
     db.add_record(nap)
-    assert len(db.list_records(1)) == 2
-    assert db.delete_day(1, date(2026, 10, 8)) == 2
+    assert len(db.list_records(1)) == 3
+    assert db.delete_day(1, date(2026, 10, 8)) == 3
     assert db.list_records(1) == []
+
+
+def test_nap_edit_does_not_remove_night_sleep(db):
+    """10/14 の事例: 夜の睡眠のあとに /edit で昼寝を入れても、夜の睡眠は消えない。"""
+    u = make_user(db, 1, share_times=False)
+    save_sleep(db, u, jst(2026, 10, 14, 1, 0), jst(2026, 10, 14, 6, 26), "button")
+    nap, c = build_record(u, *parse_manual("2026-10-14", "13:00", "14:00", NOW.replace(day=15)), source="manual")
+    assert c.is_nap
+    db.replace_day(nap)  # 万一置き換えで呼ばれても、昼寝どうししか消さない
+    assert sorted((r.duration_minutes, r.is_nap) for r in db.list_records(1)) == [(60, True), (326, False)]
 
 
 def test_manual_entry_is_encrypted_for_private_user(db, db_path):
