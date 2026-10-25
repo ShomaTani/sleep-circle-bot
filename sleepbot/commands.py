@@ -12,9 +12,10 @@ from typing import TYPE_CHECKING
 import discord
 from discord import app_commands
 
-from sleepbot import crypto
+from sleepbot import crypto, realtime
 from sleepbot.config import JST
 from sleepbot.db import SleepRecord, User
+from sleepbot.daily import daily_ranking, updated_ranking_due
 from sleepbot.groups import member_groups
 from sleepbot.groupview import group_status_text
 from sleepbot.images import Sleep, month_calendar, sleep_bands, to_png
@@ -322,6 +323,9 @@ def register_phase2(bot: SleepBot) -> None:
             f"{fmt_date(c.sleep_date)} の記録を登録したよ: {format_duration(c.duration_minutes)}{nap}{note}",
             ephemeral=True,
         )
+        # 12時のランキングのあとに今日の分が入ったら、更新版を report チャンネルに出す（睡眠時間だけ）
+        if updated_ranking_due(interaction.created_at, c.sleep_date):
+            await realtime.post(bot, daily_ranking(bot.db, c.sleep_date, bot.cfg.include_naps_in_total, updated=True))
 
     @bot.tree.command(name="delete", description="指定日の記録を削除する（日付は起きた日）")
     @app_commands.describe(date="起きた日 YYYY-MM-DD")

@@ -29,8 +29,15 @@ def daily_key(day: date) -> str:
     return f"daily-{day.isoformat()}"
 
 
-def daily_ranking(db: Database, day: date, include_naps: bool) -> str | None:
-    """記録が1件もなければ None（投稿しない）。"""
+def updated_ranking_due(now: datetime, day: date) -> bool:
+    """/edit で day の記録が入ったとき、更新版のランキングを出すか。
+    今日の分で、12時のランキングのあと（12:00 以降）だけ。12時より前の分は12時のランキングに入る。"""
+    local = now.astimezone(JST)
+    return day == local.date() and local.hour >= POST_HOUR
+
+
+def daily_ranking(db: Database, day: date, include_naps: bool, updated: bool = False) -> str | None:
+    """記録が1件もなければ None（投稿しない）。updated=True は /edit 後の更新版。"""
     rows = []
     for u in db.list_users():
         if Field.DURATION not in visible_fields(u, Audience.PUBLIC):
@@ -41,7 +48,8 @@ def daily_ranking(db: Database, day: date, include_naps: bool) -> str | None:
     if not rows:
         return None
     rows.sort(key=lambda r: (-r[0], r[1]))
-    lines = [f"🛌 **今日の睡眠ランキング {fmt_date(day)}**"]
+    title = f"🔄 **今日の睡眠ランキング（更新） {fmt_date(day)}**" if updated else f"🛌 **今日の睡眠ランキング {fmt_date(day)}**"
+    lines = [title]
     for i, (minutes, name) in enumerate(rows):
         mark = MEDALS[i] if i < len(MEDALS) else f"{i + 1}."
         lines.append(f"{mark} {safe_name(name)} {format_duration(minutes)}")

@@ -1,7 +1,8 @@
 """リアルタイム共有: 「リアルタイムでも共有する」を選んだ人の就寝・起床を REPORT_CHANNEL_ID に投稿する。
 （グループ内の共有はチャンネルに出さず、/group の本人にだけ見える返事で見る）
 
-投稿してよいかは visible_fields() の Field.REALTIME だけで決める。手入力（/edit）は投稿しない。
+投稿してよいかは visible_fields() の Field.REALTIME だけで決める。手入力（/edit）の就寝・起床は投稿しない。
+（/edit で12時のあとに今日の分が入ったときの「ランキング（更新）」も、post() でこのチャンネルに出す。睡眠時間だけ）
 """
 
 from __future__ import annotations

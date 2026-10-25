@@ -155,3 +155,15 @@ def test_group_status_empty_for_outsider(setup):
 
     text = group_status_text(setup, PendingSleeps(), frozenset(), date(2026, 10, 11))
     assert "グループさん" not in text and "・いない" in text and "・まだいない" in text
+
+
+def test_updated_ranking_only_after_noon_for_today(setup):
+    from sleepbot.daily import updated_ranking_due
+
+    day = date(2026, 10, 6)
+    assert not updated_ranking_due(jst(2026, 10, 6, 11, 59), day)  # 12時より前は12時のランキングに入る
+    assert updated_ranking_due(jst(2026, 10, 6, 12, 0), day)
+    assert not updated_ranking_due(jst(2026, 10, 7, 13, 0), day)  # 過去の日の修正では出さない
+    text = daily_ranking(setup, day, include_naps=False, updated=True)
+    assert text.startswith("🔄 **今日の睡眠ランキング（更新） 10/6(火)**")
+    assert ":" not in "".join(text.splitlines()[1:])  # 時刻は載らない

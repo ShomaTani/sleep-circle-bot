@@ -19,6 +19,7 @@ def guide_text(cfg: Config) -> str:
             "（自分にしか見えない。同じロールの人どうしでは時刻が自動で共有される）"
         )
     if cfg.report_channel_id:
+        extras.append(f"・12時のあとに `/edit` で今日の分を入れると、更新したランキングを <#{cfg.report_channel_id}> に出す")
         extras.append(f"・`/privacy` でリアルタイム共有を選んだ人: 寝た・起きたを <#{cfg.report_channel_id}> に投稿")
 
     return "\n".join(
